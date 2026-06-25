@@ -156,11 +156,11 @@ tr:hover td{background:rgba(91,130,246,.03)}
 @keyframes tup{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
 
 /* ── SPINNER ── */
-.spin{width:24px;height:24px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin:auto}
+.spin{width:24px;height:24px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-pg{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--bg)}
 .loading-pg p{color:var(--text3);font-size:.875rem}
-.loading-pg .spin{width:34px;height:34px;border-width:2.5px}
+.loading-pg .spin{width:34px;height:34px;border-width:2.5px;margin:0}
 .data-loading{display:flex;align-items:center;justify-content:center;padding:50px;gap:12px;color:var(--text3);font-size:.875rem}
 
 /* ── HOME ── */
@@ -435,7 +435,7 @@ tr:hover td{background:rgba(91,130,246,.03)}
 
 /* Tooltip */
 .org-tip{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);background:var(--surface3);border:1px solid var(--border2);border-radius:var(--r2);padding:10px 13px;font-size:.72rem;white-space:nowrap;z-index:50;box-shadow:var(--sh2);pointer-events:none;opacity:0;transition:opacity .14s;min-width:160px}
-.org-node:hover .org-tip{opacity:1}
+.org-node:hover .org-tip,.advisor-item:hover .org-tip{opacity:1}
 .org-tip-row{display:flex;gap:8px;margin-bottom:3px}
 .org-tip-row:last-child{margin-bottom:0}
 .org-tip-k{color:var(--text3);min-width:60px;font-size:.7rem}

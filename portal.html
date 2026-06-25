@@ -760,14 +760,14 @@ function UserPrefsPanel({ prefs, setPref, onClose }) {
 }
 
 // ─── BOARDS TAB ──────────────────────────────────────────────────────────────
-function OrgNode({ b, m, tier }) {
+function OrgNode({ b, m, tier, style }) {
   return (
-    <div className={`org-node n${tier}`}>
+    <div className={`org-node n${tier}`} style={style}>
       <div className="org-ava">
-        {b?.photo_url ? <img src={b.photo_url} alt={b.member_name} /> : '👤'}
+        {b?.photo_url ? <img src={b.photo_url} alt={b?.member_name || m?.full_name} /> : '👤'}
       </div>
-      <div className="org-pos">{b?.position || '—'}</div>
-      <div className="org-nm">{b?.member_name || <span style={{color:'var(--text3)',fontStyle:'italic',fontSize:'.72rem'}}>Vacant</span>}</div>
+      <div className="org-pos">{b?.position || (m?.classes?.includes('Advisor') ? 'Advisor' : '—')}</div>
+      <div className="org-nm">{b?.member_name || m?.full_name || <span style={{color:'var(--text3)',fontStyle:'italic',fontSize:'.72rem'}}>Vacant</span>}</div>
       {m && <div className="org-badges"><DivBadge div={m.division}/><RankBadge rank={m.rank}/></div>}
       <div className="org-tip">
         {m ? <>
@@ -782,33 +782,11 @@ function OrgNode({ b, m, tier }) {
   );
 }
 
-function OrgConnector({ count, nodeW, gap }) {
-  const totalW = count * nodeW + (count - 1) * gap;
-  const cx = totalW / 2;
-  const centers = Array.from({length:count}, (_,i) => i*(nodeW+gap) + nodeW/2);
-  const H = 44;
-  const midY = 22;
-  const s = 'var(--org-line)';
-  const sw = '2';
-  if (count === 1) return (
-    <svg width={nodeW} height={H} style={{display:'block',margin:'0 auto',flexShrink:0}} overflow="visible">
-      <line x1={nodeW/2} y1={0} x2={nodeW/2} y2={H} stroke={s} strokeWidth={sw}/>
-    </svg>
-  );
-  return (
-    <svg width={totalW} height={H} style={{display:'block',margin:'0 auto',flexShrink:0}} overflow="visible">
-      <line x1={cx} y1={0} x2={cx} y2={midY} stroke={s} strokeWidth={sw}/>
-      <line x1={centers[0]} y1={midY} x2={centers[count-1]} y2={midY} stroke={s} strokeWidth={sw}/>
-      {centers.map((x,i)=>(
-        <line key={i} x1={x} y1={midY} x2={x} y2={H} stroke={s} strokeWidth={sw}/>
-      ))}
-    </svg>
-  );
-}
-
 function BoardsTab({ boards, members }) {
   const gm = name => members.find(m=>m.full_name?.toLowerCase()===name?.toLowerCase());
   const gb = pos => boards.find(b=>b.position===pos)||null;
+
+  const advisors = members.filter(m => m.classes?.includes('Advisor')).sort((a, b) => a.full_name?.localeCompare(b.full_name));
 
   if (boards.length === 0) return (
     <div className="pub-content">
@@ -817,13 +795,7 @@ function BoardsTab({ boards, members }) {
     </div>
   );
 
-  const N1=176, N2=164, N3=150, G2=48, G3=32;
-  const deptColW = N3;
-  const deptTotalW = 3*N3 + 2*G3;
-
-  const VLine = ({h=36}) => (
-    <div style={{width:2,height:h,background:'var(--org-line)',margin:'0 auto'}} />
-  );
+  const N2=164, G2=48, G3=32;
 
   const depts = [
     {label:'Training', dir:'Training Director', off:'Training Officer'},
@@ -838,41 +810,195 @@ function BoardsTab({ boards, members }) {
         <p>Organizational structure of EDS UNIMA · hover a card for stats</p>
       </div>
 
-      <div style={{minWidth:720,display:'flex',flexDirection:'column',alignItems:'center',paddingBottom:36}}>
-        <OrgNode b={gb('President')} m={gm(gb('President')?.member_name)} tier={1} />
-        <VLine />
-        <OrgNode b={gb('Vice President')} m={gm(gb('Vice President')?.member_name)} tier={1} />
-        <OrgConnector count={2} nodeW={N2} gap={G2} />
-        <div style={{display:'flex',gap:G2,alignItems:'flex-start',flexShrink:0}}>
-          {['Secretary','Treasurer'].map(pos=>(
-            <div key={pos} style={{width:N2,flexShrink:0}}>
-              <OrgNode b={gb(pos)} m={gm(gb(pos)?.member_name)} tier={2} />
+      <div style={{minWidth:1240,display:'flex',gap:40,justifyContent:'center',alignItems:'flex-start',paddingBottom:36}}>
+        
+        {/* Left Column: Executive Tree */}
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',flex:1}}>
+          {/* ── President ── */}
+          <OrgNode b={gb('President')} m={gm(gb('President')?.member_name)} tier={1} />
+          
+          {/* Vertical line President → VP */}
+          <div style={{width:2,height:12,background:'var(--org-line)'}} />
+
+          {/* ── Vice President ── */}
+          <OrgNode b={gb('Vice President')} m={gm(gb('Vice President')?.member_name)} tier={1} />
+
+          {/* Vertical line VP → Sec/Treas */}
+          <div style={{width:2,height:12,background:'var(--org-line)'}} />
+
+          {/* ── Secretary & Treasurer Row ── */}
+          <div style={{display:'flex',gap:G2,justifyContent:'center',position:'relative'}}>
+            {['Secretary','Treasurer'].map((pos, idx)=>(
+              <div key={pos} style={{width:N2,flexShrink:0,position:'relative',paddingTop:12,display:'flex',flexDirection:'column'}}>
+                {/* Horizontal line segment */}
+                <div style={{
+                  position:'absolute',
+                  top:0,
+                  left: idx===0?'50%':`-${G2/2}px`,
+                  right: idx===1?'50%':`-${G2/2}px`,
+                  height:2,
+                  background:'var(--org-line)'
+                }} />
+                {/* Vertical drop line to card */}
+                <div style={{
+                  position:'absolute',
+                  top:0,
+                  left:'50%',
+                  transform:'translateX(-50%)',
+                  width:2,
+                  height:12,
+                  background:'var(--org-line)'
+                }} />
+                <OrgNode b={gb(pos)} m={gm(gb(pos)?.member_name)} tier={2} style={{height:'100%'}} />
+              </div>
+            ))}
+          </div>
+
+          {/* ── Funnel Connector below Sec/Treas ── */}
+          <div style={{display:'flex',gap:G2,justifyContent:'center',width:'100%',position:'relative',height:20}}>
+            {/* Spacer for Secretary */}
+            <div style={{width:N2,position:'relative',height:10,flexShrink:0}}>
+              {/* Vertical drop from Secretary card */}
+              <div style={{position:'absolute',top:0,left:'50%',transform:'translateX(-50%)',width:2,height:10,background:'var(--org-line)'}} />
+              {/* Horizontal line segment */}
+              <div style={{position:'absolute',bottom:0,left:'50%',right:`-${G2/2}px`,height:2,background:'var(--org-line)'}} />
             </div>
-          ))}
-        </div>
-        <OrgConnector count={3} nodeW={deptColW} gap={G3} />
-        <div style={{display:'flex',gap:G3,alignItems:'flex-start',flexShrink:0}}>
-          {depts.map(dept=>(
-            <div key={dept.label} style={{width:deptColW,display:'flex',flexDirection:'column',alignItems:'center',flexShrink:0}}>
-              <div style={{fontSize:'.59rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--text3)',padding:'2px 8px',background:'var(--surface2)',borderRadius:20,border:'1px solid var(--border)',marginBottom:8,whiteSpace:'nowrap'}}>
-                {dept.label}
-              </div>
-              <div style={{width:deptColW,flexShrink:0}}>
-                <OrgNode b={gb(dept.dir)} m={gm(gb(dept.dir)?.member_name)} tier={3} />
-              </div>
-              {boards.filter(b => b.position === dept.off).map((off, idx) => (
-                <React.Fragment key={off.id || idx}>
-                  <VLine h={24} />
-                  <div style={{width:deptColW,flexShrink:0}}>
-                    <OrgNode b={off} m={gm(off.member_name)} tier={3} />
+            {/* Spacer for Treasurer */}
+            <div style={{width:N2,position:'relative',height:10,flexShrink:0}}>
+              {/* Vertical drop from Treasurer card */}
+              <div style={{position:'absolute',top:0,left:'50%',transform:'translateX(-50%)',width:2,height:10,background:'var(--org-line)'}} />
+              {/* Horizontal line segment */}
+              <div style={{position:'absolute',bottom:0,left:`-${G2/2}px`,right:'50%',height:2,background:'var(--org-line)'}} />
+            </div>
+            {/* Center drop line */}
+            <div style={{
+              position:'absolute',
+              top:10,
+              bottom:0,
+              left:'50%',
+              transform:'translateX(-50%)',
+              width:2,
+              background:'var(--org-line)'
+            }} />
+          </div>
+
+          {/* ── 3 Department Columns ── */}
+          <div style={{display:'flex',gap:G3,alignItems:'flex-start',flexShrink:0}}>
+            {depts.map((dept, idx)=>{
+              const deptOfficers = boards.filter(b => b.position === dept.off);
+              return (
+                <div key={dept.label} style={{display:'flex',flexDirection:'column',alignItems:'center',flexShrink:0,position:'relative',paddingTop:12}}>
+                  
+                  {/* Horizontal line segment connecting the departments */}
+                  <div style={{
+                    position:'absolute',
+                    top:0,
+                    left: idx===0?'50%':`-${G3/2}px`,
+                    right: idx===depts.length-1?'50%':`-${G3/2}px`,
+                    height:2,
+                    background:'var(--org-line)'
+                  }} />
+                  {/* Vertical drop from horizontal line */}
+                  <div style={{
+                    position:'absolute',
+                    top:0,
+                    left:'50%',
+                    transform:'translateX(-50%)',
+                    width:2,
+                    height:36,
+                    background:'var(--org-line)'
+                  }} />
+
+                  {/* dept label */}
+                  <div style={{fontSize:'.59rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--text3)',padding:'2px 8px',background:'var(--surface2)',borderRadius:20,border:'1px solid var(--border)',marginBottom:8,whiteSpace:'nowrap',zIndex:2}}>
+                    {dept.label}
                   </div>
-                </React.Fragment>
-              ))}
-            </div>
-          ))}
+
+                  {/* Director */}
+                  <OrgNode b={gb(dept.dir)} m={gm(gb(dept.dir)?.member_name)} tier={3} />
+
+                  {/* Officers */}
+                  {deptOfficers.length > 0 && (
+                    <>
+                      {deptOfficers.length > 1 ? (
+                        <div style={{display:'flex',flexDirection:'column',alignItems:'center',width:'100%'}}>
+                          {/* Vertical line from Director bottom to horizontal bridge */}
+                          <div style={{width:2,height:12,background:'var(--org-line)'}} />
+                          
+                          <div style={{display:'flex',gap:12,justifyContent:'center',width:'100%'}}>
+                            {deptOfficers.map((off, oIdx)=>(
+                              <div key={off.id || oIdx} style={{position:'relative',paddingTop:12,display:'flex',flexDirection:'column'}}>
+                                {/* Horizontal bridge segment */}
+                                <div style={{
+                                  position:'absolute',
+                                  top:0,
+                                  left: oIdx===0?'50%':'-6px',
+                                  right: oIdx===1?'50%':'-6px',
+                                  height:2,
+                                  background:'var(--org-line)'
+                                }} />
+                                {/* Vertical drop to officer card */}
+                                <div style={{
+                                  position:'absolute',
+                                  top:0,
+                                  left:'50%',
+                                  transform:'translateX(-50%)',
+                                  width:2,
+                                  height:12,
+                                  background:'var(--org-line)'
+                                }} />
+                                <OrgNode b={off} m={gm(off.member_name)} tier={3} style={{height:'100%'}} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Single officer */
+                        <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
+                          <div style={{width:2,height:12,background:'var(--org-line)'}} />
+                          <OrgNode b={deptOfficers[0]} m={gm(deptOfficers[0].member_name)} tier={3} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
+
+        {/* Right Column: Board of Advisors Panel */}
+        {advisors.length > 0 && (
+          <div style={{
+            width: 350,
+            flexShrink: 0,
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--r2)',
+            padding: '16px 20px',
+            marginTop: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16
+          }}>
+            <div style={{borderBottom:'1px solid var(--border)',paddingBottom:8,className:'no-select'}}>
+              <h3 style={{fontFamily:'Playfair Display,serif',fontSize:'1.15rem',fontWeight:700,color:'var(--text)',marginBottom:2}}>Senior Advisors</h3>
+              <p style={{color:'var(--text3)',fontSize:'.72rem'}}>Senior mentors providing strategic guidance</p>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(2, 150px)',gap:12,justifyContent:'center'}}>
+              {advisors.map(m => {
+                const boardEntry = boards.find(b => b.member_name?.toLowerCase() === m.full_name?.toLowerCase());
+                return (
+                  <OrgNode key={m.id} b={boardEntry} m={m} tier={3} style={{width:'100%'}} />
+                );
+              })}
+            </div>
+          </div>
+        )}
+
       </div>
 
+      {/* Legend */}
       <div style={{display:'flex',flexWrap:'wrap',gap:12,justifyContent:'center',padding:'14px 0',borderTop:'1px solid var(--border)'}}>
         {[
           {c:'var(--gold-border)',  bg:'rgba(230,184,74,.08)',  lbl:'Top Leadership (Pres / VP)'},
@@ -889,6 +1015,7 @@ function BoardsTab({ boards, members }) {
     </div>
   );
 }
+
 
 // ─── HALL OF FAME TAB ─────────────────────────────────────────────────────────
 function HallOfFameTab({ hof }) {
@@ -1163,7 +1290,6 @@ function AppPortal() {
   if (mLoad || cLoad) {
     return (
       <div className="loading-pg">
-        <div style={{width:46,height:46,borderRadius:12,background:'linear-gradient(135deg,var(--accent),var(--accent2))',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'Playfair Display,serif',fontSize:'1.1rem',color:'#fff',fontWeight:700,marginBottom:4}}>E</div>
         <div className="spin"/>
         <p>Loading EDS UNIMA database…</p>
       </div>
