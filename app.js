@@ -180,6 +180,19 @@ function useHof() {
   return { hof, refetch: fetch };
 }
 
+
+function useStudyMaterials() {
+  const [materials, setMaterials] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const fetch = async () => { const { data } = await sb.from('study_materials').select('*').order('sort_order',{ascending:true}); setMaterials(data||[]); setLoading(false); };
+  React.useEffect(() => {
+    fetch();
+    const ch = sb.channel('materials-ch').on('postgres_changes',{event:'*',schema:'public',table:'study_materials'},fetch).subscribe();
+    return () => sb.removeChannel(ch);
+  }, []);
+  return { materials, loading, refetch: fetch };
+}
+
 function useInfoSettings() {
   const [info, setInfo] = React.useState({ org_about: 'A prestigious student organization at Universitas Negeri Manado that focuses on the proliferation of parliamentary debate.\n\nFlagship Project: Unima Debate League\n\nUniversitas Negeri Manado, Tondano, Sulawesi Utara, Indonesia' });
   React.useEffect(() => {

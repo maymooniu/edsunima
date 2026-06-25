@@ -20,6 +20,36 @@
 <script type="text/babel">
 const { useState, useEffect, useRef, useMemo } = React;
 
+// ─── IMAGE COMPRESSION HELPER ───────────────────────────────────────────────
+function compressImage(file, maxDim, callback) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width;
+      let h = img.height;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      callback(compressedDataUrl);
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 // ─── TOAST ───────────────────────────────────────────────────────────────────
 function Toast({ msg, type, onDone }) {
   useEffect(() => { const t = setTimeout(onDone, 3000); return () => clearTimeout(t); }, []);
@@ -504,9 +534,7 @@ function AdminSettings({ settings, saveSetting, toast }) {
 
   const handleFile = e => {
     const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => save('logo_url', ev.target.result);
-    reader.readAsDataURL(file);
+    compressImage(file, 200, dataUrl => save('logo_url', dataUrl));
   };
 
   const Card = ({ icon, title, desc, iconBg, children }) => (
@@ -610,7 +638,7 @@ function AdminSettings({ settings, saveSetting, toast }) {
 }
 
 // ─── ADMIN DASHBOARD ─────────────────────────────────────────────────────────
-function AdminDashboard({ members, competitions }) {
+function AdminDashboard({ members, competitions, materials = [] }) {
   const nonAlumni = members.filter(m=>!m.classes?.includes('Alumni')&&!m.classes?.includes('Ex'));
   const active = nonAlumni.filter(m=>m.active_status==='Active');
   const totalRounds = members.reduce((s,m)=>s+(m.total_rounds||0),0);
@@ -623,7 +651,7 @@ function AdminDashboard({ members, competitions }) {
 
   return (
     <div className="admin-content">
-      <div style={{marginBottom:16}}><h2 style={{fontFamily:'Playfair Display,serif',fontSize:'1.25rem',marginBottom:2}}>Dashboard</h2><p style={{color:'var(--text3)',fontSize:'.78rem'}}>EDS UNIMA at a glance</p></div>
+      <div style={{marginBottom:16}}><h2 style={{fontFamily:'Playfair Display,serif',fontSize:'1.25rem',marginBottom:2}}>Dashboard</h2><p style={{color:'var(--text3)',fontSize:'.78rem'}}>EDS UNIMA at a glance — {members.length} members · {competitions.length} competitions · {materials.length} study materials</p></div>
 
       <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--r3)',padding:'16px 20px',marginBottom:16}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10}}>
@@ -647,12 +675,13 @@ function AdminDashboard({ members, competitions }) {
           </div>
         </div>
       </div>
-      <div className="dash-stat-grid" style={{gridTemplateColumns:'repeat(2,1fr)'}}>
+      <div className="dash-stat-grid" style={{gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))'}}>
         {[
           ['Members',members.length,`${active.length} active`,'var(--accent)'],
           ['Competitions',competitions.length,`${competitions.filter(c=>c.format==='BP').length} BP · ${competitions.filter(c=>c.format==='AP').length} AP`,'var(--gold)'],
           ['Total Rounds',totalRounds,`avg ${members.length?Math.round(totalRounds/members.length):0}/member`,'var(--green)'],
           ['Total Breaks',totalBreaks,'breaking performances','var(--accent2)'],
+          ['Study Materials',materials.length,`${materials.filter(m=>m.material_type==='file').length} files · ${materials.filter(m=>m.material_type==='link').length} links`,'var(--purple)'],
         ].map(([l,v,sub,c])=>(
           <div key={l} className="dash-card"><div className="dash-card-stripe" style={{background:c}}/><div className="dash-num" style={{color:c}}>{v}</div><div className="dash-lbl">{l}</div><div className="dash-sub">{sub}</div></div>
         ))}
@@ -700,8 +729,8 @@ function PositionEditPanel({ pos, board, members, onSave, onClose }) {
   const [photoMethod, setPhotoMethod] = useState('url');
   const fileRef = useRef();
   const handleFile = e => {
-    const file=e.target.files[0]; if(!file)return;
-    const r=new FileReader(); r.onload=ev=>setPhotoUrl(ev.target.result); r.readAsDataURL(file);
+    const file = e.target.files[0]; if (!file) return;
+    compressImage(file, 300, dataUrl => setPhotoUrl(dataUrl));
   };
   return (
     <div style={{padding:'12px 14px 16px',borderTop:'1px solid var(--border)',background:'var(--surface2)'}}>
@@ -710,7 +739,10 @@ function PositionEditPanel({ pos, board, members, onSave, onClose }) {
           <label>Assign Member</label>
           <select value={memberId} onChange={e=>setMemberId(e.target.value)}>
             <option value="">— Select Member —</option>
-            {members.filter(m=>!m.classes?.includes('Alumni')&&!m.classes?.includes('Ex')).map(m=>(
+            {members.filter(m => {
+              if (pos === 'Advisor') return true; // allow selecting any member
+              return !m.classes?.includes('Alumni') && !m.classes?.includes('Ex');
+            }).map(m=>(
               <option key={m.id} value={m.id}>{m.full_name} ({m.membership_status||'Member'})</option>
             ))}
           </select>
@@ -759,7 +791,7 @@ function AdminBoards({ boards, members, refetch, toast }) {
   const getBoard = pos => boards.find(b=>b.position===pos)||null;
   const getMember = name => members.find(m=>m.full_name?.toLowerCase()===name?.toLowerCase());
 
-  const ORG_POSITIONS = ['President','Vice President','Secretary','Treasurer','Training Director','Training Officer','People Director','People Officer','MedCom Director','MedCom Officer'];
+  const ORG_POSITIONS = ['President','Vice President','Secretary','Treasurer','Training Director','Training Officer','People Director','People Officer','MedCom Director','MedCom Officer','Advisor'];
 
   const upsert = async (boardId, pos, memberId, photoUrl, extraInfo) => {
     const member = members.find(m=>m.id===+memberId);
@@ -791,6 +823,7 @@ function AdminBoards({ boards, members, refetch, toast }) {
     {label:'Training Dept',  tier:'n3', positions:['Training Director','Training Officer']},
     {label:'People Dept',    tier:'n3', positions:['People Director','People Officer']},
     {label:'MedCom Dept',    tier:'n3', positions:['MedCom Director','MedCom Officer']},
+    {label:'Senior Advisors', tier:'n3', positions:['Advisor']},
   ];
   const tierColor = t => t==='n1'?'var(--gold)':t==='n2'?'var(--accent)':'var(--text3)';
 
@@ -806,7 +839,7 @@ function AdminBoards({ boards, members, refetch, toast }) {
           <div style={{display:'flex',flexDirection:'column',gap:6}}>
             {group.positions.map(pos=>{
               const posEntries = boards.filter(b=>b.position===pos);
-              const maxAllowed = pos.endsWith('Officer') ? 2 : 1;
+              const maxAllowed = pos === 'Advisor' ? 20 : (pos.endsWith('Officer') ? 2 : 1);
               return (
                 <div key={pos} style={{display:'flex',flexDirection:'column',gap:6}}>
                   {posEntries.map((b, idx)=>{
@@ -816,7 +849,9 @@ function AdminBoards({ boards, members, refetch, toast }) {
                       <div key={b.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--r2)',overflow:'hidden'}}>
                         <div style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px'}}>
                           <div style={{width:38,height:38,borderRadius:'50%',overflow:'hidden',border:'1px solid var(--border2)',background:'var(--surface3)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:'.9rem'}}>
-                            {b.photo_url?<img src={b.photo_url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/>:'👤'}
+                            {(b.photo_url || boards.find(other => other.member_name?.toLowerCase() === b.member_name?.toLowerCase() && other.photo_url)?.photo_url)
+                              ? <img src={b.photo_url || boards.find(other => other.member_name?.toLowerCase() === b.member_name?.toLowerCase() && other.photo_url)?.photo_url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/>
+                              : '👤'}
                           </div>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontSize:'.68rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:tierColor(group.tier),marginBottom:2}}>
@@ -849,10 +884,10 @@ function AdminBoards({ boards, members, refetch, toast }) {
                       {editKey===("new-" + pos)&&<PositionEditPanel pos={pos} board={null} members={members} onSave={(p, memberId, photoUrl, extraInfo)=>upsert(null, p, memberId, photoUrl, extraInfo)} onClose={()=>setEditKey(null)}/>}
                     </div>
                   )}
-                  {posEntries.length===1 && maxAllowed===2 && (
+                  {posEntries.length < maxAllowed && posEntries.length > 0 && (
                     <div style={{padding:'2px 0 6px'}}>
                       <button className="btn btn-ghost btn-xs" onClick={()=>setEditKey(editKey===("new-" + pos)?null:("new-" + pos))} style={{fontSize:'.68rem',padding:'3px 10px'}}>
-                        {editKey===("new-" + pos)?'Cancel Assign':'+ Assign Second Officer'}
+                        {editKey===("new-" + pos)?'Cancel Assign':`+ Assign Another ${pos}`}
                       </button>
                       {editKey===("new-" + pos)&&(
                         <div style={{marginTop:6,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--r2)',overflow:'hidden'}}>
@@ -890,9 +925,7 @@ function HofForm({ entry, onSave, onClose }) {
   const set = (k,v) => setF(p=>({...p,[k]:v}));
   const handleFile = e => {
     const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => set('photo_url', ev.target.result);
-    reader.readAsDataURL(file);
+    compressImage(file, 300, dataUrl => set('photo_url', dataUrl));
   };
   return (
     <Modal title={entry?'Edit Hall of Fame Entry':'Add Hall of Fame Entry'} onClose={onClose} wide>
@@ -976,6 +1009,189 @@ function AdminHallOfFame({ hof, refetch, toast }) {
       </div>
       {showForm && <HofForm entry={editH} onSave={addOrUpdate} onClose={()=>{setShowForm(false);setEditH(null);}} />}
       {confirm && <Modal title="Delete?" onClose={()=>setConfirm(null)} sm><p style={{color:'var(--text3)'}}>Remove this Hall of Fame entry?</p><div className="m-footer"><button className="btn btn-ghost" onClick={()=>setConfirm(null)}>Cancel</button><button className="btn btn-danger" onClick={()=>del(confirm)}>Delete</button></div></Modal>}
+    </div>
+  );
+}
+
+// ─── ADMIN STUDY MATERIALS ───────────────────────────────────────────────────
+const STUDY_MAT_DEF = { title:'', description:'', material_type:'link', url:'', file_name:'', categories:[], is_highlighted:false, sort_order:99 };
+const STUDY_MAT_CATEGORIES = ['BP Format','AP Format','Adjudication','Motions','Strategy','Theory','General','Other'];
+
+function MaterialForm({ entry, onSave, onClose }) {
+  const [f, setF] = useState(entry ? {
+    ...STUDY_MAT_DEF,
+    ...entry,
+    categories: entry.categories || (entry.category ? [entry.category] : [])
+  } : { ...STUDY_MAT_DEF });
+  const [fileStatus, setFileStatus] = useState('');
+  const fileRef = useRef();
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+
+  const handleFile = e => {
+    const file = e.target.files[0]; if (!file) return;
+    setFileStatus('Reading…');
+    const reader = new FileReader();
+    reader.onload = ev => {
+      set('url', ev.target.result);
+      set('file_name', file.name);
+      setFileStatus(`✓ ${file.name}`);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const toggleCategory = c => {
+    const cur = f.categories || [];
+    const next = cur.includes(c) ? cur.filter(x => x !== c) : [...cur, c];
+    set('categories', next);
+  };
+
+  return (
+    <Modal title={entry ? 'Edit Material' : 'Add Study Material'} onClose={onClose} wide>
+      <div className="g2">
+        <div className="fg span2"><label>Title *</label><input value={f.title} onChange={e => set('title', e.target.value)} placeholder="e.g. BP Format Guide" /></div>
+        
+        <div className="fg span2">
+          <label>Categories (Select all that apply)</label>
+          <div style={{display:'flex', gap:6, flexWrap:'wrap', marginTop:6}}>
+            {STUDY_MAT_CATEGORIES.map(c => {
+              const active = (f.categories || []).includes(c);
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  className={`btn btn-sm ${active ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{borderRadius:20, fontSize:'.75rem', padding:'4px 12px'}}
+                  onClick={() => toggleCategory(c)}
+                >
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="fg span2" style={{display:'flex', alignItems:'center', gap:10, marginTop:10, marginBottom:10}}>
+          <Toggle checked={!!f.is_highlighted} onChange={v => set('is_highlighted', v)} />
+          <div>
+            <div style={{fontWeight:600, fontSize:'.85rem'}}>Highlighted Material</div>
+            <div style={{fontSize:'.72rem', color:'var(--text3)'}}>Pin this material and display it with a featured visual styling</div>
+          </div>
+        </div>
+
+        <div className="fg span2"><label>Description</label><textarea value={f.description || ''} onChange={e => set('description', e.target.value)} placeholder="Brief description of this material…" style={{minHeight:72}} /></div>
+        <div className="fg span2">
+          <label>Type</label>
+          <div style={{display:'flex',gap:6,marginBottom:10}}>
+            {['link','file'].map(t => (
+              <button key={t} className={`btn btn-sm ${f.material_type===t ? 'btn-primary' : 'btn-ghost'}`} onClick={() => set('material_type', t)}>
+                {t === 'link' ? '🔗 External Link' : '📄 File Upload'}
+              </button>
+            ))}
+          </div>
+          {f.material_type === 'link' ? (
+            <input value={f.url || ''} onChange={e => set('url', e.target.value)} placeholder="https://…" />
+          ) : (
+            <div>
+              <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current.click()}>📁 Choose File</button>
+              <input ref={fileRef} type="file" style={{display:'none'}} onChange={handleFile} />
+              {fileStatus && <span style={{marginLeft:10,fontSize:'.75rem',color:'var(--text3)'}}>{fileStatus}</span>}
+              {f.file_name && <div style={{marginTop:6,fontSize:'.72rem',color:'var(--text3)'}}>{f.file_name}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="m-footer">
+        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => { if (!f.title) return alert('Title is required.'); onSave(f); }}>
+          {entry ? 'Save Changes' : 'Add Material'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function AdminStudyMaterials({ materials, refetch, toast }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editM, setEditM] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [ordered, setOrdered] = useState([]);
+  useEffect(() => { setOrdered([...materials]); }, [materials]);
+
+  const saveOrder = async arr => {
+    for (let i = 0; i < arr.length; i++) await sb.from('study_materials').update({ sort_order: i + 1 }).eq('id', arr[i].id);
+    toast('Order saved');
+  };
+  const { onDragStart, onDragOver, onDrop, onDragEnd, isDragOver } = useDragReorder(ordered, setOrdered, saveOrder);
+
+  const addOrUpdate = async form => {
+    if (editM) {
+      const { id, created_at, uploaded_at, ...rest } = form;
+      const { error } = await sb.from('study_materials').update(rest).eq('id', editM.id);
+      if (error) toast(error.message, 'error'); else toast('Updated');
+    } else {
+      const { error } = await sb.from('study_materials').insert({ ...form, uploaded_at: new Date().toISOString(), sort_order: materials.length + 1 });
+      if (error) toast(error.message, 'error'); else toast('Added');
+    }
+    await refetch(); setShowForm(false); setEditM(null);
+  };
+
+  const del = async id => {
+    await sb.from('study_materials').delete().eq('id', id);
+    toast('Deleted'); await refetch(); setConfirm(null);
+  };
+
+  const fmtDate = d => { if (!d) return '—'; const dt = new Date(d); return dt.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }); };
+
+  return (
+    <div className="admin-content">
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}}>
+        <div>
+          <h2 style={{fontFamily:'Playfair Display,serif',fontSize:'1.25rem',marginBottom:2}}>Study Materials</h2>
+          <p style={{color:'var(--text3)',fontSize:'.78rem'}}>{materials.length} material{materials.length !== 1 ? 's' : ''} · drag ⠃ to reorder</p>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={() => { setEditM(null); setShowForm(true); }}>+ Add Material</button>
+      </div>
+      <div className="card">
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th style={{width:24}}></th><th>#</th><th>Title</th><th>Categories</th><th>Type</th><th>Uploaded</th><th>Actions</th></tr></thead>
+            <tbody>
+              {ordered.length === 0 && <tr><td colSpan={7} style={{textAlign:'center',color:'var(--text3)',padding:36}}>No materials yet. Click "+ Add Material" to get started.</td></tr>}
+              {ordered.map((m, i) => (
+                <tr key={m.id} className={`drag-row ${isDragOver(i) ? 'drag-over' : ''}`}
+                  draggable onDragStart={e => onDragStart(e, i)} onDragOver={e => onDragOver(e, i)} onDrop={e => onDrop(e, i)} onDragEnd={onDragEnd}>
+                  <td><span className="drag-handle">⠃</span></td>
+                  <td style={{color:'var(--text3)',fontWeight:600,fontSize:'.72rem'}}>{i + 1}</td>
+                  <td>
+                    <div style={{display:'flex', alignItems:'center', gap:6}}>
+                      <div style={{fontWeight:600,fontSize:'.85rem'}}>{m.title}</div>
+                      {m.is_highlighted && <span style={{fontSize:'.65rem', color:'var(--gold)', fontWeight:'bold', display:'flex', alignItems:'center', gap:2}} title="Highlighted">⭐ <span style={{fontSize:'.6rem', background:'rgba(230,184,74,.15)', padding:'1px 5px', borderRadius:4, border:'1px solid rgba(230,184,74,.3)'}}>Featured</span></span>}
+                    </div>
+                    {m.description && <div style={{fontSize:'.72rem',color:'var(--text3)',marginTop:2}}>{m.description.length > 60 ? m.description.slice(0,60) + '…' : m.description}</div>}
+                  </td>
+                  <td>
+                    <div style={{display:'flex', gap:4, flexWrap:'wrap'}}>
+                      {(m.categories && m.categories.length > 0) ? m.categories.map(cat => (
+                        <span key={cat} style={{fontSize:'.72rem',fontWeight:700,padding:'2px 7px',borderRadius:10,background:'rgba(108,143,255,.12)',color:'var(--accent)',border:'1px solid rgba(108,143,255,.2)'}}>
+                          {cat}
+                        </span>
+                      )) : <span style={{fontSize:'.72rem',fontWeight:700,padding:'2px 7px',borderRadius:10,background:'rgba(108,143,255,.12)',color:'var(--accent)',border:'1px solid rgba(108,143,255,.2)'}}>General</span>}
+                    </div>
+                  </td>
+                  <td style={{fontSize:'.78rem'}}>{m.material_type === 'file' ? '📄 File' : '🔗 Link'}</td>
+                  <td style={{color:'var(--text3)',fontSize:'.78rem'}}>{fmtDate(m.uploaded_at)}</td>
+                  <td><div style={{display:'flex',gap:4}}>
+                    <button className="btn btn-outline btn-xs" onClick={() => { setEditM(m); setShowForm(true); }}>Edit</button>
+                    <button className="btn btn-danger btn-xs" onClick={() => setConfirm(m.id)}>Del</button>
+                  </div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {showForm && <MaterialForm entry={editM} onSave={addOrUpdate} onClose={() => { setShowForm(false); setEditM(null); }} />}
+      {confirm && <Modal title="Delete?" onClose={() => setConfirm(null)} sm><p style={{color:'var(--text3)'}}>Remove this study material?</p><div className="m-footer"><button className="btn btn-ghost" onClick={() => setConfirm(null)}>Cancel</button><button className="btn btn-danger" onClick={() => del(confirm)}>Delete</button></div></Modal>}
     </div>
   );
 }
@@ -1066,13 +1282,13 @@ function AdminInfoEditor({ info, saveInfo, toast }) {
 }
 
 // ─── ADMIN SHELL ──────────────────────────────────────────────────────────────
-function AdminShell2({ onLogout, members, refetchMembers, competitions, refetchCompetitions, settings, saveSetting, boards, refetchBoards, hof, refetchHof, info, saveInfo }) {
+function AdminShell2({ onLogout, members, refetchMembers, competitions, refetchCompetitions, settings, saveSetting, boards, refetchBoards, hof, refetchHof, materials, refetchMaterials, info, saveInfo }) {
   const [section, setSection] = useState('dashboard');
   const [toast, toastEl] = useToast();
   const menu = [
     {sec:'OVERVIEW', items:[{key:'dashboard',icon:'📊',label:'Dashboard'}]},
     {sec:'DATA', items:[{key:'members',icon:'👥',label:'Members'},{key:'competitions',icon:'🏆',label:'Competitions'}]},
-    {sec:'PAGES', items:[{key:'boards',icon:'🏛️',label:'Board'},{key:'hof',icon:'🌟',label:'Hall of Fame'},{key:'info',icon:'ℹ️',label:'Info Page'}]},
+    {sec:'PAGES', items:[{key:'boards',icon:'🏛️',label:'Board'},{key:'materials',icon:'📚',label:'Study Materials'},{key:'hof',icon:'🌟',label:'Hall of Fame'},{key:'info',icon:'ℹ️',label:'Info Page'}]},
     {sec:'CONFIGURE', items:[{key:'settings',icon:'⚙️',label:'Settings'}]},
   ];
   return (
@@ -1102,10 +1318,11 @@ function AdminShell2({ onLogout, members, refetchMembers, competitions, refetchC
         </div>
       </div>
       <div className="admin-main">
-        {section==='dashboard' && <AdminDashboard members={members} competitions={competitions} />}
+        {section==='dashboard' && <AdminDashboard members={members} competitions={competitions} materials={materials} />}
         {section==='members' && <AdminMembers members={members} refetch={refetchMembers} toast={toast} />}
         {section==='competitions' && <AdminCompetitions competitions={competitions} members={members} refetch={refetchCompetitions} toast={toast} />}
         {section==='boards' && <AdminBoards boards={boards} members={members} refetch={refetchBoards} toast={toast} />}
+        {section==='materials' && <AdminStudyMaterials materials={materials} refetch={refetchMaterials} toast={toast} />}
         {section==='hof' && <AdminHallOfFame hof={hof} refetch={refetchHof} toast={toast} />}
         {section==='info' && <AdminInfoEditor info={info} saveInfo={saveInfo} toast={toast} />}
         {section==='settings' && <AdminSettings settings={settings} saveSetting={saveSetting} toast={toast} />}
@@ -1126,6 +1343,7 @@ function AppAdmin() {
   const { settings, saveSetting } = useSettings();
   const { boards, refetch: refetchBoards } = useBoards();
   const { hof, refetch: refetchHof } = useHof();
+  const { materials, refetch: refetchMaterials } = useStudyMaterials();
   const { info, saveInfo } = useInfoSettings();
   const { prefs } = useUserPrefs();
 
@@ -1183,6 +1401,8 @@ function AppAdmin() {
       refetchBoards={refetchBoards}
       hof={hof} 
       refetchHof={refetchHof}
+      materials={materials}
+      refetchMaterials={refetchMaterials}
       info={info} 
       saveInfo={saveInfo}
     />

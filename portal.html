@@ -575,7 +575,7 @@ function MembershipTab({ members, loading, competitions, settings = {} }) {
 }
 
 // ─── PUBLIC DASHBOARD (Stats) ────────────────────────────────────────────────
-function PublicDashboard({ members, competitions, loading }) {
+function PublicDashboard({ members, competitions, materials = [], loading }) {
   if (loading) return <div className="data-loading"><div className="spin"/><span>Loading stats…</span></div>;
 
   const nonAlumni = members.filter(m=>!m.classes?.includes('Alumni')&&!m.classes?.includes('Ex'));
@@ -594,15 +594,16 @@ function PublicDashboard({ members, competitions, loading }) {
     <div className="pub-content">
       <div className="pg-head">
         <h2>Stats & Overview</h2>
-        <p>EDS UNIMA at a glance — {members.length} members · {competitions.length} competitions</p>
+        <p>EDS UNIMA at a glance — {members.length} members · {competitions.length} competitions · {materials.length} study materials</p>
       </div>
 
-      <div className="dash-stat-grid" style={{gridTemplateColumns:'repeat(2,1fr)',marginBottom:16}}>
+      <div className="dash-stat-grid" style={{gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',marginBottom:16}}>
         {[
           ['Members', members.length, `${active.length} active · ${members.filter(m=>m.classes?.includes('Alumni')||m.classes?.includes('Ex')).length} alumni/ex`, 'var(--accent)'],
           ['Competitions', competitions.length, `${competitions.filter(c=>c.format==='BP').length} BP · ${competitions.filter(c=>c.format==='AP').length} AP`, 'var(--gold)'],
           ['Total Rounds', totalRounds, `avg ${members.length?Math.round(totalRounds/members.length):0} per member`, 'var(--green)'],
           ['Total Breaks', totalBreaks, `${members.length?Math.round(totalBreaks/members.length*10)/10:0} avg per member`, 'var(--accent2)'],
+          ['Study Materials', materials.length, `${materials.filter(m=>m.material_type==='file').length} files · ${materials.filter(m=>m.material_type==='link').length} links`, 'var(--purple)'],
         ].map(([l,v,sub,c])=>(
           <div key={l} className="dash-card">
             <div className="dash-card-stripe" style={{background:c}}/>
@@ -760,11 +761,12 @@ function UserPrefsPanel({ prefs, setPref, onClose }) {
 }
 
 // ─── BOARDS TAB ──────────────────────────────────────────────────────────────
-function OrgNode({ b, m, tier, style }) {
+function OrgNode({ b, m, tier, style, photoUrl }) {
+  const finalPhoto = photoUrl || b?.photo_url;
   return (
     <div className={`org-node n${tier}`} style={style}>
       <div className="org-ava">
-        {b?.photo_url ? <img src={b.photo_url} alt={b?.member_name || m?.full_name} /> : '👤'}
+        {finalPhoto ? <img src={finalPhoto} alt={b?.member_name || m?.full_name} /> : '👤'}
       </div>
       <div className="org-pos">{b?.position || (m?.classes?.includes('Advisor') ? 'Advisor' : '—')}</div>
       <div className="org-nm">{b?.member_name || m?.full_name || <span style={{color:'var(--text3)',fontStyle:'italic',fontSize:'.72rem'}}>Vacant</span>}</div>
@@ -786,7 +788,17 @@ function BoardsTab({ boards, members }) {
   const gm = name => members.find(m=>m.full_name?.toLowerCase()===name?.toLowerCase());
   const gb = pos => boards.find(b=>b.position===pos)||null;
 
-  const advisors = members.filter(m => m.classes?.includes('Advisor')).sort((a, b) => a.full_name?.localeCompare(b.full_name));
+  const advisorEntries = boards.filter(b => b.position === 'Advisor').filter(b => {
+    const isExec = boards.some(other => 
+      other.member_name?.toLowerCase() === b.member_name?.toLowerCase() && 
+      other.position !== 'Advisor'
+    );
+    return !isExec;
+  });
+  const advisors = advisorEntries.map(b => {
+    const m = members.find(m => m.full_name?.toLowerCase() === b.member_name?.toLowerCase());
+    return { boardEntry: b, member: m };
+  }).sort((a, b) => (a.member?.full_name || a.boardEntry.member_name)?.localeCompare(b.member?.full_name || b.boardEntry.member_name));
 
   if (boards.length === 0) return (
     <div className="pub-content">
@@ -986,10 +998,10 @@ function BoardsTab({ boards, members }) {
               <p style={{color:'var(--text3)',fontSize:'.72rem'}}>Senior mentors providing strategic guidance</p>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(2, 150px)',gap:12,justifyContent:'center'}}>
-              {advisors.map(m => {
-                const boardEntry = boards.find(b => b.member_name?.toLowerCase() === m.full_name?.toLowerCase());
+              {advisors.map(({ boardEntry, member }) => {
+                const photoUrl = boardEntry?.photo_url || boards.find(other => other.member_name?.toLowerCase() === boardEntry?.member_name?.toLowerCase() && other.photo_url)?.photo_url;
                 return (
-                  <OrgNode key={m.id} b={boardEntry} m={m} tier={3} style={{width:'100%'}} />
+                  <OrgNode key={boardEntry.id} b={boardEntry} m={member} tier={3} style={{width:'100%'}} photoUrl={photoUrl} />
                 );
               })}
             </div>
@@ -1048,6 +1060,204 @@ function HallOfFameTab({ hof }) {
           </div>
         )
       }
+    </div>
+  );
+}
+
+// ─── STUDY MATERIALS TAB ──────────────────────────────────────────────────
+const MATERIAL_CATEGORIES = ['BP Format','AP Format','Adjudication','Motions','Strategy','Theory','General','Other'];
+
+function StudyMaterialsTab({ materials, loading }) {
+  const [filter, setFilter] = React.useState('all');
+  const [search, setSearch] = React.useState('');
+
+  const categories = React.useMemo(() => {
+    const allCats = materials.flatMap(m => {
+      const cats = m.categories || (m.category ? [m.category] : []);
+      return cats.length > 0 ? cats : ['General'];
+    });
+    return ['all', ...new Set(allCats)];
+  }, [materials]);
+
+  const filtered = React.useMemo(() => {
+    return materials.filter(m => {
+      const cats = m.categories || (m.category ? [m.category] : []);
+      const materialCats = cats.length > 0 ? cats : ['General'];
+      const catMatches = filter === 'all' || materialCats.includes(filter);
+
+      const q = search.toLowerCase();
+      const textMatches = !q ||
+        m.title?.toLowerCase().includes(q) ||
+        m.description?.toLowerCase().includes(q) ||
+        materialCats.some(c => c.toLowerCase().includes(q));
+
+      return catMatches && textMatches;
+    });
+  }, [materials, filter, search]);
+
+  const fmtDate = d => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return dt.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+  };
+
+  const openMaterial = m => {
+    if (m.material_type === 'file' && m.url) {
+      const a = document.createElement('a');
+      a.href = m.url;
+      a.download = m.file_name || m.title || 'material';
+      a.click();
+    } else if (m.url) {
+      window.open(m.url, '_blank', 'noopener');
+    }
+  };
+
+  return (
+    <div className="pub-content">
+      <div className="pg-head">
+        <h2>Study Materials</h2>
+        <p>Debate learning resources, references, and training files</p>
+      </div>
+
+      {/* Filters */}
+      <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:16,alignItems:'center'}}>
+        <input
+          value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search materials…"
+          style={{padding:'7px 12px',borderRadius:'var(--r)',border:'1px solid var(--border2)',background:'var(--surface2)',color:'var(--text)',fontSize:'.82rem',outline:'none',minWidth:200}}
+        />
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {categories.map(c => (
+            <button key={c} onClick={() => setFilter(c)}
+              style={{
+                padding:'5px 12px', borderRadius:20, fontSize:'.72rem', fontWeight:600,
+                border: `1px solid ${filter===c ? 'var(--accent)' : 'var(--border2)'}`,
+                background: filter===c ? 'var(--accent)' : 'var(--surface2)',
+                color: filter===c ? '#fff' : 'var(--text3)', cursor:'pointer', transition:'all .15s'
+              }}
+            >{c === 'all' ? 'All Categories' : c}</button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{textAlign:'center',padding:'48px 0',color:'var(--text3)'}}>
+          <div className="spin" style={{margin:'0 auto 12px'}}/>
+          <p>Loading materials…</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="hof-empty">
+          <div className="hof-empty-ico">📚</div>
+          <p>{materials.length === 0 ? 'No study materials uploaded yet.' : 'No materials match your search.'}</p>
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {filtered.map(m => {
+            const isHigh = !!m.is_highlighted;
+            const cats = m.categories || (m.category ? [m.category] : []);
+            const materialCats = cats.length > 0 ? cats : ['General'];
+            
+            return (
+              <div key={m.id} style={{
+                background: isHigh 
+                  ? 'linear-gradient(135deg, rgba(230, 184, 74, 0.06) 0%, var(--surface) 100%)' 
+                  : 'var(--surface)',
+                border: isHigh 
+                  ? '2px solid rgba(230, 184, 74, 0.45)' 
+                  : '1px solid var(--border)',
+                borderRadius: 'var(--r2)',
+                padding: isHigh ? '13px 17px' : '14px 18px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 16,
+                transition: 'all .15s ease',
+                cursor: m.url ? 'pointer' : 'default',
+                position: 'relative'
+              }}
+                onClick={() => m.url && openMaterial(m)}
+                onMouseEnter={e => {
+                  if (m.url) {
+                    e.currentTarget.style.borderColor = isHigh ? 'rgba(230, 184, 74, 0.9)' : 'var(--accent)';
+                    e.currentTarget.style.boxShadow = isHigh ? '0 6px 24px rgba(230, 184, 74, 0.22)' : '0 0 0 1px var(--accent)';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = isHigh ? 'rgba(230, 184, 74, 0.45)' : 'var(--border)';
+                  e.currentTarget.style.boxShadow = isHigh ? '0 4px 20px rgba(230, 184, 74, 0.12)' : 'none';
+                  e.currentTarget.style.transform = 'none';
+                }}
+              >
+                {/* Icon */}
+                <div style={{
+                  width:44, height:44, borderRadius:'var(--r)', flexShrink:0, display:'flex',
+                  alignItems:'center', justifyContent:'center', fontSize:'1.3rem',
+                  background: isHigh 
+                    ? 'rgba(230, 184, 74, 0.12)' 
+                    : (m.material_type === 'file' ? 'rgba(168,85,247,.12)' : 'rgba(108,143,255,.12)'),
+                  border: isHigh 
+                    ? '1px solid rgba(230, 184, 74, 0.25)' 
+                    : `1px solid ${m.material_type === 'file' ? 'rgba(168,85,247,.25)' : 'rgba(108,143,255,.25)'}`
+                }}>
+                  {isHigh ? '⭐' : (m.material_type === 'file' ? '📄' : '🔗')}
+                </div>
+
+                {/* Info */}
+                <div style={{flex:1, minWidth:0}}>
+                  <div style={{fontWeight:700, fontSize:'.92rem', color:'var(--text)', marginBottom:3, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+                    {m.title}
+                    {isHigh && (
+                      <span style={{
+                        fontSize:'.62rem', fontWeight:800, padding:'1px 6px', borderRadius:4,
+                        background:'rgba(230, 184, 74, 0.15)', color:'var(--gold)',
+                        border:'1px solid rgba(230, 184, 74, 0.3)', display:'flex', alignItems:'center', gap:2
+                      }}>
+                        FEATURED
+                      </span>
+                    )}
+                  </div>
+                  {m.description && (
+                    <div style={{fontSize:'.78rem', color:'var(--text3)', marginBottom:5, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                      {m.description}
+                    </div>
+                  )}
+                  <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                    {materialCats.map(cat => (
+                      <span key={cat} style={{
+                        fontSize:'.65rem', fontWeight:700, padding:'2px 8px', borderRadius:10,
+                        background:'rgba(108,143,255,.12)', color:'var(--accent)',
+                        border:'1px solid rgba(108,143,255,.2)', textTransform:'uppercase', letterSpacing:'.06em'
+                      }}>{cat}</span>
+                    ))}
+                    <span style={{fontSize:'.68rem', color:'var(--text3)'}}>
+                      {m.material_type === 'file' ? (m.file_name || 'File') : 'External Link'}
+                    </span>
+                    <span style={{fontSize:'.68rem', color:'var(--text3)'}}>·</span>
+                    <span style={{fontSize:'.68rem', color:'var(--text3)'}}>{fmtDate(m.uploaded_at)}</span>
+                  </div>
+                </div>
+
+                {/* Action */}
+                {m.url && (
+                  <div 
+                    className={isHigh ? 'btn-gold' : ''}
+                    style={{
+                      flexShrink:0, padding:'6px 14px', borderRadius:'var(--r)', fontSize:'.75rem', fontWeight:600,
+                      background: isHigh ? undefined : 'var(--accent)',
+                      color: isHigh ? undefined : '#fff',
+                      display:'flex', alignItems:'center', gap:5,
+                      whiteSpace:'nowrap',
+                      boxShadow: isHigh ? '0 4px 12px rgba(223,170,50,.25)' : 'none'
+                    }}
+                  >
+                    {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1197,7 +1407,7 @@ function InfoTab({ info, settings }) {
 function PublicShell2({ tab, setTab, onHome, children, settings, onAdminNav, showPrefs, setShowPrefs }) {
   const tabs = [
     ['debaters','🎤 Debaters'],['competitions','🏆 Competitions'],['membership','📋 Membership'],
-    settings.show_stats_on_public !== false && ['stats','📊 Stats'],['boards','🏛️ Board'],['hof','🌟 Hall of Fame'],['info','ℹ️ Info'],
+    settings.show_stats_on_public !== false && ['stats','📊 Stats'],['boards','🏛️ Board'],['materials','📚 Study'],['hof','🌟 Hall of Fame'],['info','ℹ️ Info'],
   ].filter(Boolean);
   return (
     <div style={{display:'flex',flexDirection:'column',minHeight:'100vh'}}>
@@ -1237,6 +1447,7 @@ function AppPortal() {
   const { settings } = useSettings();
   const { boards } = useBoards();
   const { hof } = useHof();
+  const { materials, loading: matLoad } = useStudyMaterials();
   const { info } = useInfoSettings();
   const { prefs, setPref } = useUserPrefs();
   const [showPrefs, setShowPrefs] = useState(false);
@@ -1302,8 +1513,9 @@ function AppPortal() {
         {tab==='debaters' && <DebatersTab members={members} loading={mLoad} settings={settings} competitions={competitions} />}
         {tab==='competitions' && <CompetitionsTab competitions={competitions} members={members} loading={cLoad} settings={settings} />}
         {tab==='membership' && <MembershipTab members={members} loading={mLoad} competitions={competitions} settings={settings} />}
-        {tab==='stats' && <PublicDashboard members={members} competitions={competitions} loading={mLoad||cLoad} />}
+        {tab==='stats' && <PublicDashboard members={members} competitions={competitions} materials={materials} loading={mLoad||cLoad||matLoad} />}
         {tab==='boards' && <BoardsTab boards={boards} members={members} />}
+        {tab==='materials' && <StudyMaterialsTab materials={materials} loading={matLoad} />}
         {tab==='hof' && <HallOfFameTab hof={hof} />}
         {tab==='info' && <InfoTab info={info} settings={settings} />}
       </PublicShell2>
