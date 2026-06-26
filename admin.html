@@ -466,10 +466,22 @@ function AdminMembers({ members, refetch, toast }) {
 }
 
 // ─── ADMIN COMPETITIONS MOTIONS MODAL ──────────────────────────────────────────
-function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose }) {
+function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose, refetchMotions }) {
   const compId = comp.id;
-  const existingMotions = (settings.comp_motions || {})[compId] || [];
-  const [motions, setMotions] = useState(() => existingMotions.map(m => ({ ...m })));
+  const [motions, setMotions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    sb.from('motions')
+      .select('*')
+      .eq('competition_id', compId)
+      .order('id', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) toast(error.message, 'error');
+        else setMotions(data || []);
+        setLoading(false);
+      });
+  }, [compId]);
 
   const addRound = () => {
     const roundNumber = motions.length + 1;
@@ -487,24 +499,34 @@ function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose }) 
   const save = async () => {
     const invalid = motions.some(m => !m.round.trim() || !m.motion.trim());
     if (invalid) {
-      if (!confirm('Some rounds have empty names or motion text. Are you sure you want to save?')) {
+      if (!window.confirm('Some rounds have empty names or motion text. Are you sure you want to save?')) {
         return;
       }
     }
 
-    const nextMotions = {
-      ...(settings.comp_motions || {}),
-      [compId]: motions.map(m => ({
-        round: m.round.trim(),
-        motion: m.motion.trim(),
-        infoslide: m.infoslide?.trim() || '',
-        tags: m.tags ? m.tags.split(',').map(t => t.trim()).filter(Boolean).join(', ') : ''
-      })).filter(m => m.round || m.motion)
-    };
-
     try {
-      await saveSetting('comp_motions', nextMotions);
+      // 1. Delete all existing motions for this competition
+      const { error: delErr } = await sb.from('motions').delete().eq('competition_id', compId);
+      if (delErr) throw delErr;
+
+      // 2. Insert new list
+      if (motions.length > 0) {
+        const payload = motions.map(m => ({
+          competition_id: compId,
+          round: m.round.trim(),
+          motion: m.motion.trim(),
+          infoslide: m.infoslide?.trim() || '',
+          tags: m.tags ? m.tags.split(',').map(t => t.trim()).filter(Boolean).join(', ') : ''
+        })).filter(m => m.round || m.motion);
+        
+        if (payload.length > 0) {
+          const { error: insErr } = await sb.from('motions').insert(payload);
+          if (insErr) throw insErr;
+        }
+      }
+
       toast('Motions saved successfully');
+      if (refetchMotions) await refetchMotions();
       onClose();
     } catch (err) {
       toast(err.message, 'error');
@@ -514,7 +536,9 @@ function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose }) 
   return (
     <Modal title={`Motions: ${comp.code}`} onClose={onClose} wide>
       <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: 10, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {motions.length === 0 ? (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 24, color: 'var(--text3)' }}>Loading motions...</div>
+        ) : motions.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text3)', fontSize: '.84rem' }}>
             No rounds defined for this competition. Click "+ Add Round" to create one.
           </div>
@@ -588,10 +612,10 @@ function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose }) 
         )}
       </div>
       <div className="m-footer" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14 }}>
-        <button className="btn btn-ghost btn-sm" onClick={addRound}>+ Add Round</button>
+        <button className="btn btn-ghost btn-sm" onClick={addRound} disabled={loading}>+ Add Round</button>
         <div style={{ display: 'flex', gap: 6 }}>
           <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary btn-sm" onClick={save}>Save Motions</button>
+          <button className="btn btn-primary btn-sm" onClick={save} disabled={loading}>Save Motions</button>
         </div>
       </div>
     </Modal>
@@ -599,7 +623,7 @@ function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose }) 
 }
 
 // ─── ADMIN COMPETITIONS ───────────────────────────────────────────────────────
-function AdminCompetitions({ competitions, members, refetch, toast, settings, saveSetting }) {
+function AdminCompetitions({ competitions, members, refetch, toast, settings, saveSetting, refetchMotions }) {
   const [showForm, setShowForm] = useState(false);
   const [editC, setEditC] = useState(null);
   const [confirm, setConfirm] = useState(null);
@@ -656,7 +680,7 @@ function AdminCompetitions({ competitions, members, refetch, toast, settings, sa
       </div>
       {showForm && <CompForm comp={editC} members={members} onSave={addOrUpdate} onClose={()=>{setShowForm(false);setEditC(null);}} />}
       {confirm && <Modal title="Delete?" onClose={()=>setConfirm(null)} sm><p style={{color:'var(--text3)'}}>Permanently delete this competition?</p><div className="m-footer"><button className="btn btn-ghost" onClick={()=>setConfirm(null)}>Cancel</button><button className="btn btn-danger" onClick={()=>del(confirm)}>Delete</button></div></Modal>}
-      {selectedCompForMotions && <AdminCompMotionsModal comp={selectedCompForMotions} settings={settings} saveSetting={saveSetting} toast={toast} onClose={()=>setSelectedCompForMotions(null)} />}
+      {selectedCompForMotions && <AdminCompMotionsModal comp={selectedCompForMotions} settings={settings} saveSetting={saveSetting} toast={toast} onClose={()=>setSelectedCompForMotions(null)} refetchMotions={refetchMotions} />}
     </div>
   );
 }
@@ -1598,7 +1622,7 @@ function AdminMotions({ settings, saveSetting, toast, competitions, motions, ref
   }, [settings.standalone_motions, settings.comp_motions]);
 
   const runMigration = async () => {
-    if (!confirm("This will migrate all legacy motions stored in app settings into the new relational table. Proceed?")) return;
+    if (!window.confirm("This will migrate all legacy motions stored in app settings into the new relational table. Proceed?")) return;
     setMigrating(true);
     try {
       const standalones = settings.standalone_motions || [];
