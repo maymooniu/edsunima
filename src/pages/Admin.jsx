@@ -85,6 +85,151 @@ function Toggle({ checked, onChange }) {
   );
 }
 
+// ─── FIXED TAGS FOR MOTIONS ──────────────────────────────────────────────────
+const PRIMARY_TAGS = [
+  'Africa', 'Art', 'Asia', 'Children', 'Cities', 'Criminal Justice', 'Culture', 'Development',
+  'Economics', 'Education/Academia', 'Environment', 'Europe', 'Feminism', 'International Relations',
+  'Latin America', 'Law', 'LGBTQ+', 'Media', 'Medical', 'Middle East', 'Military', 'Minority Communities',
+  'Philosophy', 'Politics', 'Religion', 'Romance/Sexuality', 'Science/Technology', 'Social Justice', 'Sports'
+];
+
+const SECONDARY_TAGS = [
+  'Aging/Elderly Care', 'Animal Rights', 'Artificial Intelligence', 'Bioethics', 'Censorship', 'Charity',
+  'China/Taiwan', 'Civil Disobedience', 'Civil Liberties', 'Climate Change', 'Colonialism', 'Corporate Regulation',
+  'Cryptocurrency', 'Cybersecurity', 'Democracy', 'Disability Rights', 'Disinformation', 'Drugs',
+  'Energy', 'Family/Parenting', 'Foreign Policy', 'Free Speech', 'Funny', 'Genetic Engineering',
+  'Globalization', 'Gun Control', 'Healthcare', 'Historical Memory', 'Housing', 'Human Rights',
+  'Immigration', 'India/Pakistan', 'Indigenous Peoples', 'Intellectual Property', 'Israel/Palestine',
+  'Journalism', 'Labor', 'Medicine', 'Mental Health', 'Nationalism', 'Pacifism', 'Police', 'Populism',
+  'Poverty', 'Privacy', 'Private Property', 'Protest Movements', 'Refugees & Asylum', 'Reparations',
+  'Reproductive Rights', 'Sanctions', 'Social Media', 'Surveillance', 'Taxation', 'Terrorism', 'Tourism',
+  'Trade', 'Ukraine/Russia', 'Universal Basic Income', 'Whistleblowing'
+];
+
+function TagPicker({ value, onChange }) {
+  const selected = useMemo(() => {
+    return value ? value.split(',').map(t => t.trim()).filter(Boolean) : [];
+  }, [value]);
+
+  const [isOpen, setIsOpen] = useState(false);
+
+  const toggleTag = (tag) => {
+    let next;
+    if (selected.includes(tag)) {
+      next = selected.filter(t => t !== tag);
+    } else {
+      next = [...selected, tag];
+    }
+    onChange(next.join(', '));
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, minHeight: 34, padding: '6px 10px', border: '1px solid var(--border2)', borderRadius: 'var(--r)', background: 'var(--surface2)', alignItems: 'center' }}>
+        {selected.length === 0 ? (
+          <span style={{ fontSize: '.76rem', color: 'var(--text3)', fontStyle: 'italic', paddingLeft: 4 }}>No tags selected</span>
+        ) : (
+          selected.map(tag => (
+            <span key={tag} className="badge b-blue" style={{ fontSize: '.72rem', display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px' }}>
+              {tag}
+              <button 
+                type="button" 
+                onClick={() => toggleTag(tag)}
+                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, fontSize: '.8rem', display: 'inline-flex', alignItems: 'center' }}
+              >
+                ×
+              </button>
+            </span>
+          ))
+        )}
+      </div>
+
+      <div>
+        <button
+          type="button"
+          className="btn btn-ghost btn-xs"
+          onClick={() => setIsOpen(!isOpen)}
+          style={{ fontSize: '.72rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
+        >
+          {isOpen ? '▲ Hide Tag List' : '▼ Show/Edit Available Tags'}
+        </button>
+      </div>
+
+      {isOpen && (
+        <div style={{
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--r)',
+          background: 'var(--surface)',
+          padding: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          maxHeight: 250,
+          overflowY: 'auto'
+        }}>
+          <div>
+            <div style={{ fontSize: '.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text3)', marginBottom: 6 }}>Primary Types</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {PRIMARY_TAGS.map(tag => {
+                const active = selected.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => toggleTag(tag)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 14,
+                      border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border2)'),
+                      background: active ? 'rgba(91,130,246,.15)' : 'var(--surface2)',
+                      color: active ? 'var(--accent)' : 'var(--text2)',
+                      fontSize: '.72rem',
+                      fontWeight: active ? 700 : 500,
+                      cursor: 'pointer',
+                      transition: 'all .1s'
+                    }}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: '.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text3)', marginBottom: 6 }}>Secondary Types</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {SECONDARY_TAGS.map(tag => {
+                const active = selected.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => toggleTag(tag)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 14,
+                      border: '1px solid ' + (active ? 'var(--accent2)' : 'var(--border2)'),
+                      background: active ? 'rgba(192,132,252,.15)' : 'var(--surface2)',
+                      color: active ? 'var(--accent2)' : 'var(--text2)',
+                      fontSize: '.72rem',
+                      fontWeight: active ? 700 : 500,
+                      cursor: 'pointer',
+                      transition: 'all .1s'
+                    }}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MODAL ───────────────────────────────────────────────────────────────────
 function Modal({ title, onClose, children, wide, sm }) {
   useEffect(() => {
@@ -632,12 +777,10 @@ function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose, re
                   />
                 </div>
                 <div className="fg" style={{ gridColumn: 'span 2' }}>
-                  <label style={{ fontSize: '.74rem', marginBottom: 2 }}>Tags (Comma-separated, e.g. IR, Economy, Environment)</label>
-                  <input 
+                  <label style={{ fontSize: '.74rem', marginBottom: 2 }}>Tags (Select multiple from preset list)</label>
+                  <TagPicker 
                     value={m.tags || ''} 
-                    onChange={e => updateRound(idx, 'tags', e.target.value)} 
-                    placeholder="Economy, Social Justice, Technology" 
-                    style={{ padding: '6px 8px', fontSize: '.8rem' }}
+                    onChange={val => updateRound(idx, 'tags', val)} 
                   />
                 </div>
               </div>
@@ -1630,8 +1773,8 @@ function MotionForm({ entry, competitions, onSave, onClose }) {
         )}
 
         <div className="fg span2">
-          <label>Tags (Comma-separated, e.g. IR, Economy, Environment)</label>
-          <input value={f.tags} onChange={e => set('tags', e.target.value)} placeholder="Economy, Social Justice, Technology" />
+          <label>Tags (Select multiple from preset list)</label>
+          <TagPicker value={f.tags || ''} onChange={val => set('tags', val)} />
         </div>
       </div>
       <div className="m-footer">
