@@ -287,10 +287,12 @@ function ProfileModal({ member, competitions, onClose }) {
 }
 
 // ─── COMPETITION MODAL (participants) ─────────────────────────────────────────
-function CompParticipantsModal({ comp, members, onClose, settings = {} }) {
+function CompParticipantsModal({ comp, members, onClose, settings = {}, motions = [] }) {
   if (!comp) return null;
-  const motions = (settings.comp_motions || {})[comp.id] || [];
-  const hasMotions = motions.length > 0;
+  const compMotions = useMemo(() => {
+    return motions.filter(m => m.competition_id === comp.id);
+  }, [motions, comp.id]);
+  const hasMotions = compMotions.length > 0;
   const [activeTab, setActiveTab] = useState('participants');
 
   const participants = comp.participants || [];
@@ -348,7 +350,7 @@ function CompParticipantsModal({ comp, members, onClose, settings = {} }) {
               transition: 'all .15s'
             }}
           >
-            📜 Motions ({motions.length})
+            📜 Motions ({compMotions.length})
           </button>
         </div>
       )}
@@ -384,7 +386,7 @@ function CompParticipantsModal({ comp, members, onClose, settings = {} }) {
         )
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '4px 0' }}>
-          {motions.map((m, idx) => (
+          {compMotions.map((m, idx) => (
             <div key={idx} style={{
               background: 'var(--surface2)',
               border: '1px solid var(--border)',
@@ -571,7 +573,7 @@ function DebatersTab({ members, loading, settings = {}, competitions }) {
 }
 
 // ─── COMPETITIONS TAB ─────────────────────────────────────────────────────────
-function CompetitionsTab({ competitions, members, loading, settings = {} }) {
+function CompetitionsTab({ competitions, members, loading, settings = {}, motions = [] }) {
   const [search, setSearch] = useState('');
   const [fFmt, setFFmt] = useState('All');
   const [viewComp, setViewComp] = useState(null);
@@ -671,7 +673,7 @@ function CompetitionsTab({ competitions, members, loading, settings = {} }) {
           </div>
         </div>
       )}
-      {viewComp && <CompParticipantsModal comp={viewComp} members={members} onClose={()=>setViewComp(null)} settings={settings} />}
+      {viewComp && <CompParticipantsModal comp={viewComp} members={members} onClose={()=>setViewComp(null)} settings={settings} motions={motions} />}
     </div>
   );
 }
@@ -924,7 +926,7 @@ function LevelColumnChart({ byLevel, maxVal }) {
 }
 
 // ─── PUBLIC DASHBOARD (Stats) ────────────────────────────────────────────────
-function PublicDashboard({ members, competitions, materials = [], loading }) {
+function PublicDashboard({ members, competitions, materials = [], loading, motions = [] }) {
   if (loading) return <div className="data-loading"><div className="spin"/><span>Loading stats…</span></div>;
 
   const nonAlumni = members.filter(m=>!m.classes?.includes('Alumni')&&!m.classes?.includes('Ex'));
@@ -938,6 +940,36 @@ function PublicDashboard({ members, competitions, materials = [], loading }) {
   const byLevel = {}; competitions.forEach(c=>{byLevel[c.level]=(byLevel[c.level]||0)+1;});
   const maxDiv = Math.max(...Object.values(byDiv), 1);
   const maxRank = Math.max(...Object.values(byRank), 1);
+
+  // Motions Analytics calculations
+  const bpMotionsCount = motions.filter(m => {
+    const comp = m.competition_id ? competitions.find(c => c.id === m.competition_id) : null;
+    return comp ? comp.format === 'BP' : m.format === 'BP';
+  }).length;
+  const apMotionsCount = motions.filter(m => {
+    const comp = m.competition_id ? competitions.find(c => c.id === m.competition_id) : null;
+    return comp ? comp.format === 'AP' : m.format === 'AP';
+  }).length;
+  const standaloneCount = motions.filter(m => !m.competition_id).length;
+  const compTiedCount = motions.filter(m => m.competition_id).length;
+  const totalFormat = Math.max(bpMotionsCount + apMotionsCount, 1);
+  const totalScope = Math.max(standaloneCount + compTiedCount, 1);
+
+  const tagCounts = {};
+  motions.forEach(m => {
+    if (m.tags) {
+      m.tags.split(',').forEach(tag => {
+        const trimmed = tag.trim();
+        if (trimmed) {
+          tagCounts[trimmed] = (tagCounts[trimmed] || 0) + 1;
+        }
+      });
+    }
+  });
+  const sortedTags = Object.entries(tagCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  const maxTagCount = sortedTags.length > 0 ? Math.max(...sortedTags.map(t => t[1])) : 1;
 
   return (
     <div className="pub-content">
@@ -953,6 +985,7 @@ function PublicDashboard({ members, competitions, materials = [], loading }) {
           ['Total Rounds', totalRounds, `avg ${members.length?Math.round(totalRounds/members.length):0} per member`, 'var(--green)'],
           ['Total Breaks', totalBreaks, `${members.length?Math.round(totalBreaks/members.length*10)/10:0} avg per member`, 'var(--accent2)'],
           ['Study Materials', materials.length, `${materials.filter(m=>m.material_type==='file').length} files · ${materials.filter(m=>m.material_type==='link').length} links`, 'var(--purple)'],
+          ['Motions', motions.length, `${standaloneCount} practice · ${compTiedCount} tournament`, 'var(--red)'],
         ].map(([l,v,sub,c])=>(
           <div key={l} className="dash-card">
             <div className="dash-card-stripe" style={{background:c}}/>
@@ -995,6 +1028,67 @@ function PublicDashboard({ members, competitions, materials = [], loading }) {
               <div className="progress-val">{v}</div>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Motions Analytics Grid */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:12,marginBottom:12}}>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Motion Formats & Scope Ratio</div>
+          <div style={{display:'flex',flexDirection:'column',gap:16}}>
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:'.76rem',fontWeight:600,marginBottom:6}}>
+                <span style={{color:'var(--text2)'}}>Formats Breakdown</span>
+                <span style={{color:'var(--text3)'}}>{bpMotionsCount} BP · {apMotionsCount} AP</span>
+              </div>
+              <div style={{height:8,background:'var(--surface2)',borderRadius:4,overflow:'hidden',display:'flex'}}>
+                <div style={{width:`${bpMotionsCount/totalFormat*100}%`,background:'var(--blue)',height:'100%'}} title={`BP: ${bpMotionsCount}`} />
+                <div style={{width:`${apMotionsCount/totalFormat*100}%`,background:'var(--purple)',height:'100%'}} title={`AP: ${apMotionsCount}`} />
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',marginTop:4,fontSize:'.64rem',color:'var(--text3)'}}>
+                <span>BP Format ({Math.round(bpMotionsCount/totalFormat*100)}%)</span>
+                <span>AP Format ({Math.round(apMotionsCount/totalFormat*100)}%)</span>
+              </div>
+            </div>
+
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:'.76rem',fontWeight:600,marginBottom:6}}>
+                <span style={{color:'var(--text2)'}}>Practice vs. Tournament</span>
+                <span style={{color:'var(--text3)'}}>{standaloneCount} Practice · {compTiedCount} Tournament</span>
+              </div>
+              <div style={{height:8,background:'var(--surface2)',borderRadius:4,overflow:'hidden',display:'flex'}}>
+                <div style={{width:`${standaloneCount/totalScope*100}%`,background:'var(--gold)',height:'100%'}} title={`Practice: ${standaloneCount}`} />
+                <div style={{width:`${compTiedCount/totalScope*100}%`,background:'var(--accent)',height:'100%'}} title={`Tournament: ${compTiedCount}`} />
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',marginTop:4,fontSize:'.64rem',color:'var(--text3)'}}>
+                <span>Standalone Practice ({Math.round(standaloneCount/totalScope*100)}%)</span>
+                <span>Tournament tied ({Math.round(compTiedCount/totalScope*100)}%)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Top Debate Topics (Tags)</div>
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {sortedTags.length === 0 ? (
+              <div style={{textAlign:'center',color:'var(--text3)',fontSize:'.78rem',padding:'20px 0'}}>No tags found in motions.</div>
+            ) : (
+              sortedTags.map(([tag, count]) => (
+                <div key={tag} className="progress-row" style={{alignItems:'center'}}>
+                  <div className="progress-lbl" style={{width:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontSize:'.74rem',fontWeight:600}} title={tag}>
+                    {tag}
+                  </div>
+                  <div className="progress-bar" style={{flex:1}}>
+                    <div className="progress-fill" style={{width:`${count/maxTagCount*100}%`,background:'var(--accent)'}}/>
+                  </div>
+                  <div className="progress-val" style={{width:40,textAlign:'right',fontSize:'.74rem',fontWeight:700,color:'var(--accent)'}}>
+                    {count}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
 
@@ -1848,63 +1942,33 @@ function StudyMaterialsTab({ materials, loading }) {
 }
 
 // ─── PUBLIC MOTIONS TAB ───────────────────────────────────────────────────────
-function MotionsTab({ competitions, settings, members }) {
+function MotionsTab({ competitions, settings, members, motions = [] }) {
   const [search, setSearch] = useState('');
   const [formatFilter, setFormatFilter] = useState('All');
   const [levelFilter, setLevelFilter] = useState('All');
   const [tagFilter, setTagFilter] = useState('All');
   const [viewComp, setViewComp] = useState(null);
 
-  const compList = useMemo(() => {
-    const list = [];
-    const sortedComps = [...competitions].sort((a, b) => b.id - a.id);
-    sortedComps.forEach(comp => {
-      const motions = (settings.comp_motions || {})[comp.id] || [];
-      motions.forEach((m, idx) => {
-        list.push({
-          id: `comp-${comp.id}-${idx}`,
-          compId: comp.id,
-          compCode: comp.code,
-          compName: comp.competition,
-          round: m.round || `Round ${idx + 1}`,
-          motion: m.motion,
-          infoslide: m.infoslide || '',
-          format: comp.format || 'None',
-          level: comp.level || 'None',
-          date: comp.comp_date || '',
-          source: comp.code,
-          isStandalone: false,
-          tags: m.tags ? m.tags.split(',').map(t => t.trim()).filter(Boolean) : []
-        });
-      });
-    });
-    return list;
-  }, [competitions, settings.comp_motions]);
-
-  const standaloneList = useMemo(() => {
-    const list = (settings.standalone_motions || [])
-      .map((m, idx) => ({
-        id: `standalone-${m.id || idx}`,
-        round: m.round || 'Standalone',
+  const allMotions = useMemo(() => {
+    return motions.map(m => {
+      const comp = m.competition_id ? competitions.find(c => c.id === m.competition_id) : null;
+      return {
+        id: m.id,
+        compId: m.competition_id,
+        compCode: comp ? comp.code : '',
+        compName: comp ? comp.competition : '',
+        round: m.round || 'Round',
         motion: m.motion,
         infoslide: m.infoslide || '',
-        format: m.format || 'None',
-        level: m.level || 'None',
-        date: m.date || '',
-        source: 'Standalone',
-        isStandalone: true,
+        format: comp ? (comp.format || 'BP') : (m.format || 'BP'),
+        level: comp ? (comp.level || 'None') : (m.level || 'None'),
+        date: comp ? (comp.comp_date || '') : (m.date || ''),
+        source: comp ? comp.code : 'Standalone',
+        isStandalone: !m.competition_id,
         tags: m.tags ? m.tags.split(',').map(t => t.trim()).filter(Boolean) : []
-      }));
-    return [...list].sort((a, b) => {
-      const idA = parseInt(a.id.replace('standalone-', ''), 10) || 0;
-      const idB = parseInt(b.id.replace('standalone-', ''), 10) || 0;
-      return idB - idA;
+      };
     });
-  }, [settings.standalone_motions]);
-
-  const allMotions = useMemo(() => {
-    return [...compList, ...standaloneList];
-  }, [compList, standaloneList]);
+  }, [motions, competitions]);
 
   const allTags = useMemo(() => {
     const tagsSet = new Set();
@@ -2186,7 +2250,7 @@ function MotionsTab({ competitions, settings, members }) {
           ))}
         </div>
       )}
-      {viewComp && <CompParticipantsModal comp={viewComp} members={members} onClose={() => setViewComp(null)} settings={settings} />}
+      {viewComp && <CompParticipantsModal comp={viewComp} members={members} onClose={() => setViewComp(null)} settings={settings} motions={motions} />}
     </div>
   );
 }
@@ -2373,6 +2437,7 @@ function PublicShell2({ tab, setTab, onHome, children, settings, onAdminNav, sho
 function AppPortal() {
   const { members, loading: mLoad } = useMembers();
   const { competitions, loading: cLoad } = useCompetitions();
+  const { motions, loading: motionsLoad } = useMotions();
   const { settings } = useSettings();
   const { boards } = useBoards();
   const { hof } = useHof();
@@ -2427,7 +2492,7 @@ function AppPortal() {
     return null;
   }
 
-  if (mLoad || cLoad) {
+  if (mLoad || cLoad || motionsLoad) {
     return (
       <div className="loading-pg">
         <div className="spin"/>
@@ -2440,12 +2505,12 @@ function AppPortal() {
     <>
       <PublicShell2 tab={tab} setTab={handleSetTab} onHome={()=>window.location.href='index.html'} settings={settings} onAdminNav={()=>window.location.href='admin.html'} showPrefs={showPrefs} setShowPrefs={setShowPrefs}>
         {tab==='debaters' && <DebatersTab members={members} loading={mLoad} settings={settings} competitions={competitions} />}
-        {tab==='competitions' && <CompetitionsTab competitions={competitions} members={members} loading={cLoad} settings={settings} />}
+        {tab==='competitions' && <CompetitionsTab competitions={competitions} members={members} loading={cLoad} settings={settings} motions={motions} />}
         {tab==='membership' && <MembershipTab members={members} loading={mLoad} competitions={competitions} settings={settings} />}
-        {tab==='stats' && <PublicDashboard members={members} competitions={competitions} materials={materials} loading={mLoad||cLoad||matLoad} />}
+        {tab==='stats' && <PublicDashboard members={members} competitions={competitions} materials={materials} motions={motions} loading={mLoad||cLoad||matLoad||motionsLoad} />}
         {tab==='boards' && <BoardsTab boards={boards} members={members} />}
         {tab==='materials' && <StudyMaterialsTab materials={materials} loading={matLoad} />}
-        {tab==='motions' && <MotionsTab competitions={competitions} settings={settings} members={members} />}
+        {tab==='motions' && <MotionsTab competitions={competitions} settings={settings} members={members} motions={motions} />}
         {tab==='hof' && <HallOfFameTab hof={hof} />}
         {tab==='info' && <InfoTab info={info} settings={settings} />}
       </PublicShell2>

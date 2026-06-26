@@ -1585,131 +1585,193 @@ function MotionForm({ entry, competitions, onSave, onClose }) {
   );
 }
 
-function AdminMotions({ settings, saveSetting, toast, competitions }) {
+function AdminMotions({ settings, saveSetting, toast, competitions, motions, refetch }) {
   const [showForm, setShowForm] = useState(false);
   const [editM, setEditM] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [migrating, setMigrating] = useState(false);
 
-  const motions = useMemo(() => {
-    const standalones = (settings.standalone_motions || []).map((m, idx) => ({
-      ...m,
-      isStandalone: true,
-      displayId: `standalone-${m.id || idx}`,
-      sourceLabel: 'Standalone',
-    }));
-
-    const compTied = [];
+  const hasLegacyData = useMemo(() => {
+    const standalones = settings.standalone_motions || [];
     const compMotions = settings.comp_motions || {};
-    competitions.forEach(comp => {
-      const motionsList = compMotions[comp.id] || [];
-      motionsList.forEach((m, idx) => {
-        compTied.push({
-          id: `comp-${comp.id}-${idx}`,
-          displayId: `comp-${comp.id}-${idx}`,
-          compId: comp.id,
-          index: idx,
-          round: m.round,
+    return standalones.length > 0 || Object.keys(compMotions).length > 0;
+  }, [settings.standalone_motions, settings.comp_motions]);
+
+  const runMigration = async () => {
+    if (!confirm("This will migrate all legacy motions stored in app settings into the new relational table. Proceed?")) return;
+    setMigrating(true);
+    try {
+      const standalones = settings.standalone_motions || [];
+      const compMotions = settings.comp_motions || {};
+      const payload = [];
+
+      // 1. Map standalones
+      standalones.forEach(m => {
+        payload.push({
           motion: m.motion,
           infoslide: m.infoslide || '',
-          format: comp.format || 'None',
-          level: comp.level || 'None',
-          date: comp.comp_date || '',
+          round: m.round || 'Standalone',
+          format: m.format || 'BP',
+          level: m.level || 'None',
+          date: m.date || null,
           tags: m.tags || '',
-          isStandalone: false,
-          sourceLabel: `🏆 ${comp.code}`,
-          compName: comp.competition
+          competition_id: null
         });
       });
-    });
 
-    return [...standalones, ...compTied];
-  }, [settings.standalone_motions, settings.comp_motions, competitions]);
+      // 2. Map competition motions
+      Object.entries(compMotions).forEach(([compId, list]) => {
+        list.forEach(m => {
+          payload.push({
+            motion: m.motion,
+            infoslide: m.infoslide || '',
+            round: m.round || 'Round',
+            format: 'BP',
+            level: 'None',
+            date: null,
+            tags: m.tags || '',
+            competition_id: Number(compId)
+          });
+        });
+      });
+
+      // 3. Bulk insert to supabase
+      if (payload.length > 0) {
+        const { error } = await sb.from('motions').insert(payload);
+        if (error) throw error;
+      }
+
+      // 4. Clear settings keys
+      await saveSetting('standalone_motions', []);
+      await saveSetting('comp_motions', {});
+      
+      toast('Migration completed! All legacy motions moved to the database.');
+      if (refetch) await refetch();
+    } catch (err) {
+      alert('Migration failed: ' + err.message);
+    } finally {
+      setMigrating(false);
+    }
+  };
+
+  const motionsList = useMemo(() => {
+    return motions.map((m, idx) => {
+      const comp = m.competition_id ? competitions.find(c => c.id === m.competition_id) : null;
+      return {
+        ...m,
+        isStandalone: !m.competition_id,
+        compId: m.competition_id,
+        format: comp ? (comp.format || 'None') : (m.format || 'None'),
+        level: comp ? (comp.level || 'None') : (m.level || 'None'),
+        date: comp ? (comp.comp_date || '') : (m.date || ''),
+        sourceLabel: comp ? `🏆 ${comp.code}` : 'Standalone',
+        compName: comp ? comp.competition : ''
+      };
+    });
+  }, [motions, competitions]);
 
   const addOrUpdate = async form => {
-    let standalones = [...(settings.standalone_motions || [])];
-    let compMotions = { ...(settings.comp_motions || {}) };
+    try {
+      if (form.isStandalone) {
+        const payload = {
+          motion: form.motion.trim(),
+          infoslide: form.infoslide.trim(),
+          round: form.round.trim(),
+          format: form.format,
+          level: form.level,
+          date: form.date || null,
+          tags: form.tags.split(',').map(t => t.trim()).filter(Boolean).join(', '),
+          competition_id: null
+        };
 
-    // 1. If editing, remove the old motion from its original place
-    if (editM) {
-      if (editM.isStandalone) {
-        standalones = standalones.filter(m => m.id !== editM.id);
+        if (editM) {
+          const { error } = await sb.from('motions').update(payload).eq('id', editM.id);
+          if (error) throw error;
+          toast('Updated');
+        } else {
+          const { error } = await sb.from('motions').insert(payload);
+          if (error) throw error;
+          toast('Added');
+        }
       } else {
-        const oldCompId = editM.compId;
-        if (compMotions[oldCompId]) {
-          compMotions[oldCompId] = compMotions[oldCompId].filter((_, idx) => idx !== editM.index);
-          if (compMotions[oldCompId].length === 0) {
-            delete compMotions[oldCompId];
-          }
+        const payload = {
+          motion: form.motion.trim(),
+          infoslide: form.infoslide.trim(),
+          round: form.round.trim(),
+          format: 'BP',
+          level: 'None',
+          date: null,
+          tags: form.tags.split(',').map(t => t.trim()).filter(Boolean).join(', '),
+          competition_id: form.compId
+        };
+
+        if (editM) {
+          const { error } = await sb.from('motions').update(payload).eq('id', editM.id);
+          if (error) throw error;
+          toast('Updated');
+        } else {
+          const { error } = await sb.from('motions').insert(payload);
+          if (error) throw error;
+          toast('Added');
         }
       }
+
+      if (refetch) await refetch();
+      setShowForm(false);
+      setEditM(null);
+    } catch (err) {
+      toast(err.message, 'error');
     }
-
-    // 2. Insert/Save the new motion to its target place
-    if (form.isStandalone) {
-      const cleanForm = {
-        motion: form.motion.trim(),
-        infoslide: form.infoslide.trim(),
-        round: form.round.trim(),
-        format: form.format,
-        level: form.level,
-        date: form.date,
-        tags: form.tags.split(',').map(t => t.trim()).filter(Boolean).join(', ')
-      };
-
-      if (editM && editM.isStandalone) {
-        cleanForm.id = editM.id;
-      } else {
-        const newId = standalones.reduce((max, m) => Math.max(max, parseInt(m.id || 0, 10)), 0) + 1;
-        cleanForm.id = newId;
-      }
-      standalones.push(cleanForm);
-    } else {
-      const targetCompId = form.compId;
-      const cleanForm = {
-        round: form.round.trim(),
-        motion: form.motion.trim(),
-        infoslide: form.infoslide.trim(),
-        tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean).join(', ') : ''
-      };
-      if (!compMotions[targetCompId]) {
-        compMotions[targetCompId] = [];
-      }
-      compMotions[targetCompId].push(cleanForm);
-    }
-
-    await saveSetting('standalone_motions', standalones);
-    await saveSetting('comp_motions', compMotions);
-
-    toast(editM ? 'Updated' : 'Added');
-    setShowForm(false);
-    setEditM(null);
   };
 
   const del = async motionItem => {
-    if (motionItem.isStandalone) {
-      const standalones = (settings.standalone_motions || []).filter(m => m.id !== motionItem.id);
-      await saveSetting('standalone_motions', standalones);
-    } else {
-      const compMotions = { ...(settings.comp_motions || {}) };
-      const compId = motionItem.compId;
-      if (compMotions[compId]) {
-        compMotions[compId] = compMotions[compId].filter((_, idx) => idx !== motionItem.index);
-        if (compMotions[compId].length === 0) {
-          delete compMotions[compId];
-        }
-      }
-      await saveSetting('comp_motions', compMotions);
+    try {
+      const { error } = await sb.from('motions').delete().eq('id', motionItem.id);
+      if (error) throw error;
+      toast('Deleted');
+      if (refetch) await refetch();
+      setConfirm(null);
+    } catch (err) {
+      toast(err.message, 'error');
     }
-    toast('Deleted');
-    setConfirm(null);
   };
 
   return (
     <div className="admin-content">
+      {hasLegacyData && (
+        <div style={{
+          background: 'rgba(230, 184, 74, 0.08)',
+          border: '1px solid rgba(230, 184, 74, 0.3)',
+          borderRadius: 'var(--r2)',
+          padding: '12px 18px',
+          marginBottom: 16,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap'
+        }}>
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div style={{ fontWeight: 700, fontSize: '.85rem', color: 'var(--gold)', marginBottom: 3 }}>⚠️ Legacy Motions Data Detected</div>
+            <div style={{ fontSize: '.75rem', color: 'var(--text2)' }}>
+              You have motions stored in the old configuration format. Click migrate to move all standalone and competition-tied motions into the new database table structure.
+            </div>
+          </div>
+          <button 
+            className="btn btn-primary btn-sm" 
+            onClick={runMigration} 
+            disabled={migrating}
+            style={{ background: 'var(--gold)', color: '#000', border: 'none' }}
+          >
+            {migrating ? 'Migrating...' : '🚀 Migrate Data'}
+          </button>
+        </div>
+      )}
+
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}}>
         <div>
           <h2 style={{fontFamily:'Playfair Display,serif',fontSize:'1.25rem',marginBottom:2}}>Motions Archive</h2>
-          <p style={{color:'var(--text3)',fontSize:'.78rem'}}>{motions.length} motion{motions.length !== 1 ? 's' : ''} in database</p>
+          <p style={{color:'var(--text3)',fontSize:'.78rem'}}>{motionsList.length} motion{motionsList.length !== 1 ? 's' : ''} in database</p>
         </div>
         <button className="btn btn-primary btn-sm" onClick={() => { setEditM(null); setShowForm(true); }}>+ Add Motion</button>
       </div>
@@ -1729,15 +1791,15 @@ function AdminMotions({ settings, saveSetting, toast, competitions }) {
               </tr>
             </thead>
             <tbody>
-              {motions.length === 0 && (
+              {motionsList.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{textAlign:'center',color:'var(--text3)',padding:36}}>
+                   <td colSpan={8} style={{textAlign:'center',color:'var(--text3)',padding:36}}>
                     No motions yet. Click "+ Add Motion" to start.
                   </td>
                 </tr>
               )}
-              {motions.map((m, i) => (
-                <tr key={m.displayId || i}>
+              {motionsList.map((m, i) => (
+                <tr key={m.id || i}>
                   <td style={{color:'var(--text3)',fontWeight:600,fontSize:'.72rem'}}>{i + 1}</td>
                   <td style={{fontWeight:600, fontSize:'.78rem', color:'var(--accent)', whiteSpace:'nowrap'}}>{m.round || '—'}</td>
                   <td style={{fontSize:'.82rem', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}} title={m.motion}>
@@ -1789,7 +1851,7 @@ function AdminMotions({ settings, saveSetting, toast, competitions }) {
 }
 
 // ─── ADMIN SHELL ──────────────────────────────────────────────────────────────
-function AdminShell2({ onLogout, members, refetchMembers, competitions, refetchCompetitions, settings, saveSetting, boards, refetchBoards, hof, refetchHof, materials, refetchMaterials, info, saveInfo }) {
+function AdminShell2({ onLogout, members, refetchMembers, competitions, refetchCompetitions, settings, saveSetting, boards, refetchBoards, hof, refetchHof, materials, refetchMaterials, info, saveInfo, motions, refetchMotions }) {
   const [section, setSection] = useState('dashboard');
   const [toast, toastEl] = useToast();
   const menu = [
@@ -1827,10 +1889,10 @@ function AdminShell2({ onLogout, members, refetchMembers, competitions, refetchC
       <div className="admin-main">
         {section==='dashboard' && <AdminDashboard members={members} competitions={competitions} materials={materials} />}
         {section==='members' && <AdminMembers members={members} refetch={refetchMembers} toast={toast} />}
-        {section==='competitions' && <AdminCompetitions competitions={competitions} members={members} refetch={refetchCompetitions} toast={toast} settings={settings} saveSetting={saveSetting} />}
+        {section==='competitions' && <AdminCompetitions competitions={competitions} members={members} refetch={refetchCompetitions} toast={toast} settings={settings} saveSetting={saveSetting} refetchMotions={refetchMotions} />}
         {section==='boards' && <AdminBoards boards={boards} members={members} refetch={refetchBoards} toast={toast} />}
         {section==='materials' && <AdminStudyMaterials materials={materials} refetch={refetchMaterials} toast={toast} />}
-        {section==='motions' && <AdminMotions settings={settings} saveSetting={saveSetting} toast={toast} competitions={competitions} />}
+        {section==='motions' && <AdminMotions settings={settings} saveSetting={saveSetting} toast={toast} competitions={competitions} motions={motions} refetch={refetchMotions} />}
         {section==='hof' && <AdminHallOfFame hof={hof} refetch={refetchHof} toast={toast} />}
         {section==='info' && <AdminInfoEditor info={info} saveInfo={saveInfo} toast={toast} />}
         {section==='settings' && <AdminSettings settings={settings} saveSetting={saveSetting} toast={toast} />}
@@ -1848,6 +1910,7 @@ function AppAdmin() {
 
   const { members, loading: mLoad, refetch: refetchMembers } = useMembers();
   const { competitions, loading: cLoad, refetch: refetchCompetitions } = useCompetitions();
+  const { motions, loading: motionsLoad, refetch: refetchMotions } = useMotions();
   const { settings, saveSetting } = useSettings();
   const { boards, refetch: refetchBoards } = useBoards();
   const { hof, refetch: refetchHof } = useHof();
@@ -1887,7 +1950,7 @@ function AppAdmin() {
     return <AdminLogin onLogin={handleLogin} settings={settings} />;
   }
 
-  if (mLoad || cLoad) {
+  if (mLoad || cLoad || motionsLoad) {
     return (
       <div className="loading-pg">
         <div className="spin"/>
@@ -1913,6 +1976,8 @@ function AppAdmin() {
       refetchMaterials={refetchMaterials}
       info={info} 
       saveInfo={saveInfo}
+      motions={motions}
+      refetchMotions={refetchMotions}
     />
   );
 }
