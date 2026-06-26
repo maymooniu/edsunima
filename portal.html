@@ -1847,6 +1847,350 @@ function StudyMaterialsTab({ materials, loading }) {
   );
 }
 
+// ─── PUBLIC MOTIONS TAB ───────────────────────────────────────────────────────
+function MotionsTab({ competitions, settings, members }) {
+  const [search, setSearch] = useState('');
+  const [formatFilter, setFormatFilter] = useState('All');
+  const [levelFilter, setLevelFilter] = useState('All');
+  const [tagFilter, setTagFilter] = useState('All');
+  const [viewComp, setViewComp] = useState(null);
+
+  const compList = useMemo(() => {
+    const list = [];
+    const sortedComps = [...competitions].sort((a, b) => b.id - a.id);
+    sortedComps.forEach(comp => {
+      const motions = (settings.comp_motions || {})[comp.id] || [];
+      motions.forEach((m, idx) => {
+        list.push({
+          id: `comp-${comp.id}-${idx}`,
+          compId: comp.id,
+          compCode: comp.code,
+          compName: comp.competition,
+          round: m.round || `Round ${idx + 1}`,
+          motion: m.motion,
+          infoslide: m.infoslide || '',
+          format: comp.format || 'None',
+          level: comp.level || 'None',
+          date: comp.comp_date || '',
+          source: comp.code,
+          isStandalone: false,
+          tags: []
+        });
+      });
+    });
+    return list;
+  }, [competitions, settings.comp_motions]);
+
+  const standaloneList = useMemo(() => {
+    const list = (settings.standalone_motions || [])
+      .map((m, idx) => ({
+        id: `standalone-${m.id || idx}`,
+        round: m.round || 'Standalone',
+        motion: m.motion,
+        infoslide: m.infoslide || '',
+        format: m.format || 'None',
+        level: m.level || 'None',
+        date: m.date || '',
+        source: 'Standalone',
+        isStandalone: true,
+        tags: m.tags ? m.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+      }));
+    return [...list].sort((a, b) => {
+      const idA = parseInt(a.id.replace('standalone-', ''), 10) || 0;
+      const idB = parseInt(b.id.replace('standalone-', ''), 10) || 0;
+      return idB - idA;
+    });
+  }, [settings.standalone_motions]);
+
+  const allMotions = useMemo(() => {
+    return [...compList, ...standaloneList];
+  }, [compList, standaloneList]);
+
+  const allTags = useMemo(() => {
+    const tagsSet = new Set();
+    standaloneList.forEach(m => {
+      m.tags.forEach(t => tagsSet.add(t));
+    });
+    return Array.from(tagsSet).sort();
+  }, [standaloneList]);
+
+  const filtered = useMemo(() => {
+    return allMotions.filter(m => {
+      if (formatFilter !== 'All' && m.format !== formatFilter) return false;
+      if (levelFilter !== 'All' && m.level !== levelFilter) return false;
+      if (tagFilter !== 'All') {
+        if (tagFilter === 'Standalone' && !m.isStandalone) return false;
+        if (tagFilter !== 'Standalone' && !m.tags.includes(tagFilter)) return false;
+      }
+
+      const q = search.toLowerCase().trim();
+      if (!q) return true;
+
+      return (
+        m.motion.toLowerCase().includes(q) ||
+        m.round.toLowerCase().includes(q) ||
+        m.source.toLowerCase().includes(q) ||
+        (m.compName && m.compName.toLowerCase().includes(q)) ||
+        m.level.toLowerCase().includes(q) ||
+        m.format.toLowerCase().includes(q) ||
+        m.tags.some(t => t.toLowerCase().includes(q))
+      );
+    });
+  }, [allMotions, search, formatFilter, levelFilter, tagFilter]);
+
+  const handleSourceClick = (m) => {
+    if (m.isStandalone) return;
+    const comp = competitions.find(c => c.id === m.compId);
+    if (comp) setViewComp(comp);
+  };
+
+  return (
+    <div className="pub-content">
+      <div className="pg-head">
+        <h2>Motions Archive</h2>
+        <p>Browse through debates, practice rounds, and competition motions</p>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search motions, rounds, topics..."
+            style={{
+              padding: '8px 14px',
+              borderRadius: 'var(--r)',
+              border: '1px solid var(--border2)',
+              background: 'var(--surface2)',
+              color: 'var(--text)',
+              fontSize: '.82rem',
+              outline: 'none',
+              minWidth: 260,
+              flex: 1
+            }}
+          />
+          
+          <select 
+            value={formatFilter}
+            onChange={e => setFormatFilter(e.target.value)}
+            style={{
+              padding: '7px 12px',
+              borderRadius: 'var(--r)',
+              border: '1px solid var(--border2)',
+              background: 'var(--surface2)',
+              color: 'var(--text)',
+              fontSize: '.82rem',
+              outline: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="All">All Formats</option>
+            <option value="BP">BP Format</option>
+            <option value="AP">AP Format</option>
+          </select>
+
+          <select 
+            value={levelFilter}
+            onChange={e => setLevelFilter(e.target.value)}
+            style={{
+              padding: '7px 12px',
+              borderRadius: 'var(--r)',
+              border: '1px solid var(--border2)',
+              background: 'var(--surface2)',
+              color: 'var(--text)',
+              fontSize: '.82rem',
+              outline: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="All">All Levels</option>
+            <option value="International">International</option>
+            <option value="National">National</option>
+            <option value="Regional">Regional</option>
+            <option value="Provincial">Provincial</option>
+            <option value="University">University</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: '.72rem', color: 'var(--text3)', marginRight: 4, fontWeight: 600 }}>Topics:</span>
+          <button
+            onClick={() => setTagFilter('All')}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 20,
+              fontSize: '.7rem',
+              fontWeight: 600,
+              border: `1px solid ${tagFilter === 'All' ? 'var(--accent)' : 'var(--border2)'}`,
+              background: tagFilter === 'All' ? 'var(--accent)' : 'var(--surface2)',
+              color: tagFilter === 'All' ? '#fff' : 'var(--text3)',
+              cursor: 'pointer',
+              transition: 'all .15s'
+            }}
+          >
+            All Topics
+          </button>
+          <button
+            onClick={() => setTagFilter('Standalone')}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 20,
+              fontSize: '.7rem',
+              fontWeight: 600,
+              border: `1px solid ${tagFilter === 'Standalone' ? 'var(--gold)' : 'var(--border2)'}`,
+              background: tagFilter === 'Standalone' ? 'var(--gold)' : 'var(--surface2)',
+              color: tagFilter === 'Standalone' ? '#000' : 'var(--text3)',
+              cursor: 'pointer',
+              transition: 'all .15s'
+            }}
+          >
+            ⭐ Standalone
+          </button>
+          {allTags.map(tag => (
+            <button
+              key={tag}
+              onClick={() => setTagFilter(tag)}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 20,
+                fontSize: '.7rem',
+                fontWeight: 600,
+                border: `1px solid ${tagFilter === tag ? 'var(--accent)' : 'var(--border2)'}`,
+                background: tagFilter === tag ? 'var(--accent)' : 'var(--surface2)',
+                color: tagFilter === tag ? '#fff' : 'var(--text3)',
+                cursor: 'pointer',
+                transition: 'all .15s'
+              }}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="hof-empty">
+          <div className="hof-empty-ico">📜</div>
+          <p>No motions match your filters.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {filtered.map(m => (
+            <div
+              key={m.id}
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--r2)',
+                padding: '16px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                transition: 'all .15s ease'
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = 'var(--accent)';
+                e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--border)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: '.78rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                  {m.round}
+                </span>
+                
+                <div 
+                  onClick={() => handleSourceClick(m)}
+                  style={{
+                    fontSize: '.68rem',
+                    fontWeight: 700,
+                    color: m.isStandalone ? 'var(--gold)' : 'var(--text2)',
+                    background: m.isStandalone ? 'rgba(230, 184, 74, 0.08)' : 'var(--surface2)',
+                    border: `1px solid ${m.isStandalone ? 'rgba(230, 184, 74, 0.2)' : 'var(--border)'}`,
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    cursor: m.isStandalone ? 'default' : 'pointer',
+                    transition: 'all .15s'
+                  }}
+                  title={m.isStandalone ? '' : 'Click to view competition details'}
+                >
+                  {m.isStandalone ? '⭐ Standalone Practice' : `🏆 ${m.source}`}
+                </div>
+              </div>
+
+              <div style={{
+                fontStyle: 'italic',
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                color: 'var(--text)',
+                lineHeight: 1.45,
+                padding: '4px 0'
+              }}>
+                "{m.motion}"
+              </div>
+
+              {m.infoslide && (
+                <div style={{
+                  fontSize: '.78rem',
+                  color: 'var(--text3)',
+                  background: 'var(--surface2)',
+                  borderLeft: '3px solid var(--border2)',
+                  padding: '8px 12px',
+                  borderRadius: 4,
+                  whiteSpace: 'pre-line',
+                  marginTop: 4
+                }}>
+                  <div style={{ fontWeight: 700, fontSize: '.68rem', textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text2)', marginBottom: 4 }}>Info Slide</div>
+                  {m.infoslide}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 4 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {m.format !== 'None' && (
+                    <span className={`badge ${m.format === 'BP' ? 'b-blue' : 'b-purple'}`} style={{ fontSize: '.6rem', fontWeight: 700 }}>
+                      {m.format}
+                    </span>
+                  )}
+                  {m.level !== 'None' && (
+                    <span className="badge b-gray" style={{ fontSize: '.6rem', fontWeight: 700 }}>
+                      {m.level}
+                    </span>
+                  )}
+                  {m.tags.map(tag => (
+                    <span key={tag} style={{
+                      fontSize: '.58rem',
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                      background: 'rgba(108,143,255,0.08)',
+                      color: 'var(--accent)',
+                      border: '1px solid rgba(108,143,255,0.15)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '.04em'
+                    }}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                {m.date && (
+                  <span style={{ fontSize: '.68rem', color: 'var(--text3)' }}>
+                    {m.date}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {viewComp && <CompParticipantsModal comp={viewComp} members={members} onClose={() => setViewComp(null)} settings={settings} />}
+    </div>
+  );
+}
+
 // ─── INFO TAB ─────────────────────────────────────────────────────────────────
 const DEFAULT_INFO = {
   org_about:'A prestigious student organization at Universitas Negeri Manado that focuses on the proliferation of parliamentary debate.\n\nFlagship Project: Unima Debate League\n\nUniversitas Negeri Manado, Tondano, Sulawesi Utara, Indonesia'
@@ -1992,7 +2336,7 @@ function InfoTab({ info, settings }) {
 function PublicShell2({ tab, setTab, onHome, children, settings, onAdminNav, showPrefs, setShowPrefs }) {
   const tabs = [
     ['debaters','🎤 Debaters'],['competitions','🏆 Competitions'],['membership','📋 Membership'],
-    settings.show_stats_on_public !== false && ['stats','📊 Stats'],['boards','🏛️ Board'],['materials','📚 Study'],['hof','🌟 Hall of Fame'],['info','ℹ️ Info'],
+    settings.show_stats_on_public !== false && ['stats','📊 Stats'],['boards','🏛️ Board'],['materials','📚 Study'],['motions','📜 Motions'],['hof','🌟 Hall of Fame'],['info','ℹ️ Info'],
   ].filter(Boolean);
   return (
     <div style={{display:'flex',flexDirection:'column',minHeight:'100vh'}}>
@@ -2101,6 +2445,7 @@ function AppPortal() {
         {tab==='stats' && <PublicDashboard members={members} competitions={competitions} materials={materials} loading={mLoad||cLoad||matLoad} />}
         {tab==='boards' && <BoardsTab boards={boards} members={members} />}
         {tab==='materials' && <StudyMaterialsTab materials={materials} loading={matLoad} />}
+        {tab==='motions' && <MotionsTab competitions={competitions} settings={settings} members={members} />}
         {tab==='hof' && <HallOfFameTab hof={hof} />}
         {tab==='info' && <InfoTab info={info} settings={settings} />}
       </PublicShell2>
