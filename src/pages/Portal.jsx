@@ -2450,28 +2450,10 @@ export default function Portal() {
   const { prefs, setPref } = useUserPrefs();
   const [showPrefs, setShowPrefs] = useState(false);
 
-  const [tab, setTab] = useState('debaters');
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const initialTab = params.get('tab') || settings.default_tab || 'debaters';
-    setTab(initialTab);
-  }, [settings.default_tab]);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      const params = new URLSearchParams(window.location.search);
-      setTab(params.get('tab') || settings.default_tab || 'debaters');
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [settings.default_tab]);
+  const tab = searchParams.get('tab') || settings.default_tab || 'debaters';
 
   const handleSetTab = (t) => {
-    setTab(t);
-    const url = new URL(window.location);
-    url.searchParams.set('tab', t);
-    window.history.pushState({}, '', url);
+    setSearchParams({ tab: t });
   };
 
   useEffect(() => {
