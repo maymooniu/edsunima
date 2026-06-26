@@ -473,7 +473,7 @@ function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose }) 
 
   const addRound = () => {
     const roundNumber = motions.length + 1;
-    setMotions([...motions, { round: `Round ${roundNumber}`, motion: '', infoslide: '' }]);
+    setMotions([...motions, { round: `Round ${roundNumber}`, motion: '', infoslide: '', tags: '' }]);
   };
 
   const removeRound = (index) => {
@@ -497,7 +497,8 @@ function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose }) 
       [compId]: motions.map(m => ({
         round: m.round.trim(),
         motion: m.motion.trim(),
-        infoslide: m.infoslide?.trim() || ''
+        infoslide: m.infoslide?.trim() || '',
+        tags: m.tags ? m.tags.split(',').map(t => t.trim()).filter(Boolean).join(', ') : ''
       })).filter(m => m.round || m.motion)
     };
 
@@ -570,6 +571,15 @@ function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose }) 
                       outline: 'none',
                       fontFamily: 'inherit'
                     }}
+                  />
+                </div>
+                <div className="fg" style={{ gridColumn: 'span 2' }}>
+                  <label style={{ fontSize: '.74rem', marginBottom: 2 }}>Tags (Comma-separated, e.g. IR, Economy, Environment)</label>
+                  <input 
+                    value={m.tags || ''} 
+                    onChange={e => updateRound(idx, 'tags', e.target.value)} 
+                    placeholder="Economy, Social Justice, Technology" 
+                    style={{ padding: '6px 8px', fontSize: '.8rem' }}
                   />
                 </div>
               </div>
@@ -1409,13 +1419,89 @@ function AdminInfoEditor({ info, saveInfo, toast }) {
 // ─── ADMIN MOTIONS (STANDALONE) ──────────────────────────────────────────────
 const STANDALONE_MOTION_DEF = { motion: '', infoslide: '', round: '', format: 'BP', level: 'National', tags: '', date: '' };
 
-function MotionForm({ entry, onSave, onClose }) {
-  const [f, setF] = useState(entry ? { ...STANDALONE_MOTION_DEF, ...entry } : { ...STANDALONE_MOTION_DEF });
+function MotionForm({ entry, competitions, onSave, onClose }) {
+  const [motionType, setMotionType] = useState(() => {
+    if (entry && !entry.isStandalone) return 'competition';
+    return 'standalone';
+  });
+  const [selectedCompId, setSelectedCompId] = useState(() => {
+    if (entry && !entry.isStandalone) return entry.compId || '';
+    return '';
+  });
+  const [f, setF] = useState(() => {
+    if (entry) {
+      return { ...STANDALONE_MOTION_DEF, ...entry, tags: entry.tags || '' };
+    }
+    return { ...STANDALONE_MOTION_DEF };
+  });
+
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
 
+  const handleSave = () => {
+    if (!f.motion.trim()) return alert('Motion text is required.');
+    if (!f.round.trim()) return alert('Round / Context is required.');
+
+    if (motionType === 'competition') {
+      if (!selectedCompId) return alert('Please select a competition.');
+      onSave({
+        isStandalone: false,
+        compId: Number(selectedCompId),
+        motion: f.motion,
+        infoslide: f.infoslide,
+        round: f.round,
+        tags: f.tags
+      });
+    } else {
+      onSave({
+        isStandalone: true,
+        motion: f.motion,
+        infoslide: f.infoslide,
+        round: f.round,
+        format: f.format,
+        level: f.level,
+        date: f.date,
+        tags: f.tags
+      });
+    }
+  };
+
   return (
-    <Modal title={entry ? 'Edit Standalone Motion' : 'Add Standalone Motion'} onClose={onClose} wide>
+    <Modal title={entry ? 'Edit Motion' : 'Add Motion'} onClose={onClose} wide>
       <div className="g2">
+        <div className="fg span2">
+          <label>Motion Type</label>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+            <button
+              type="button"
+              className={`btn btn-sm ${motionType === 'standalone' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setMotionType('standalone')}
+            >
+              ⭐ Standalone Practice
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${motionType === 'competition' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setMotionType('competition')}
+            >
+              🏆 Tied to Competition
+            </button>
+          </div>
+        </div>
+
+        {motionType === 'competition' && (
+          <div className="fg span2">
+            <label>Select Competition *</label>
+            <select value={selectedCompId} onChange={e => setSelectedCompId(e.target.value)}>
+              <option value="">— Select Existing Competition —</option>
+              {competitions.map(comp => (
+                <option key={comp.id} value={comp.id}>
+                  {comp.code} - {comp.competition} ({comp.comp_date || 'No Date'})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="fg span2">
           <label>Motion Text *</label>
           <input value={f.motion} onChange={e => set('motion', e.target.value)} placeholder="This House would..." />
@@ -1444,29 +1530,46 @@ function MotionForm({ entry, onSave, onClose }) {
           <label>Round / Context *</label>
           <input value={f.round} onChange={e => set('round', e.target.value)} placeholder="e.g. Practice Round 1" />
         </div>
-        <div className="fg">
-          <label>Format</label>
-          <select value={f.format} onChange={e => set('format', e.target.value)}>
-            <option>BP</option>
-            <option>AP</option>
-            <option>None</option>
-          </select>
-        </div>
-        <div className="fg">
-          <label>Level</label>
-          <select value={f.level} onChange={e => set('level', e.target.value)}>
-            <option>None</option>
-            <option>International</option>
-            <option>National</option>
-            <option>Regional</option>
-            <option>Provincial</option>
-            <option>University</option>
-          </select>
-        </div>
-        <div className="fg">
-          <label>Date (Optional)</label>
-          <input type="date" value={f.date || ''} onChange={e => set('date', e.target.value)} />
-        </div>
+
+        {motionType === 'standalone' ? (
+          <>
+            <div className="fg">
+              <label>Format</label>
+              <select value={f.format} onChange={e => set('format', e.target.value)}>
+                <option>BP</option>
+                <option>AP</option>
+                <option>None</option>
+              </select>
+            </div>
+            <div className="fg">
+              <label>Level</label>
+              <select value={f.level} onChange={e => set('level', e.target.value)}>
+                <option>None</option>
+                <option>International</option>
+                <option>National</option>
+                <option>Regional</option>
+                <option>Provincial</option>
+                <option>University</option>
+              </select>
+            </div>
+            <div className="fg">
+              <label>Date (Optional)</label>
+              <input type="date" value={f.date || ''} onChange={e => set('date', e.target.value)} />
+            </div>
+          </>
+        ) : (
+          <div className="fg span2" style={{
+            background: 'var(--surface2)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--r)',
+            padding: '10px 14px',
+            fontSize: '.76rem',
+            color: 'var(--text3)'
+          }}>
+            ℹ️ This motion will inherit the Format, Level, and Date from the selected competition.
+          </div>
+        )}
+
         <div className="fg span2">
           <label>Tags (Comma-separated, e.g. IR, Economy, Environment)</label>
           <input value={f.tags} onChange={e => set('tags', e.target.value)} placeholder="Economy, Social Justice, Technology" />
@@ -1474,7 +1577,7 @@ function MotionForm({ entry, onSave, onClose }) {
       </div>
       <div className="m-footer">
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => { if (!f.motion.trim()) return alert('Motion text is required.'); onSave(f); }}>
+        <button className="btn btn-primary" onClick={handleSave}>
           {entry ? 'Save Changes' : 'Add Motion'}
         </button>
       </div>
@@ -1482,42 +1585,121 @@ function MotionForm({ entry, onSave, onClose }) {
   );
 }
 
-function AdminMotions({ settings, saveSetting, toast }) {
+function AdminMotions({ settings, saveSetting, toast, competitions }) {
   const [showForm, setShowForm] = useState(false);
   const [editM, setEditM] = useState(null);
   const [confirm, setConfirm] = useState(null);
 
   const motions = useMemo(() => {
-    return settings.standalone_motions || [];
-  }, [settings.standalone_motions]);
+    const standalones = (settings.standalone_motions || []).map((m, idx) => ({
+      ...m,
+      isStandalone: true,
+      displayId: `standalone-${m.id || idx}`,
+      sourceLabel: 'Standalone',
+    }));
+
+    const compTied = [];
+    const compMotions = settings.comp_motions || {};
+    competitions.forEach(comp => {
+      const motionsList = compMotions[comp.id] || [];
+      motionsList.forEach((m, idx) => {
+        compTied.push({
+          id: `comp-${comp.id}-${idx}`,
+          displayId: `comp-${comp.id}-${idx}`,
+          compId: comp.id,
+          index: idx,
+          round: m.round,
+          motion: m.motion,
+          infoslide: m.infoslide || '',
+          format: comp.format || 'None',
+          level: comp.level || 'None',
+          date: comp.comp_date || '',
+          tags: m.tags || '',
+          isStandalone: false,
+          sourceLabel: `🏆 ${comp.code}`,
+          compName: comp.competition
+        });
+      });
+    });
+
+    return [...standalones, ...compTied];
+  }, [settings.standalone_motions, settings.comp_motions, competitions]);
 
   const addOrUpdate = async form => {
-    let updated;
-    const cleanForm = {
-      ...form,
-      motion: form.motion.trim(),
-      infoslide: form.infoslide.trim(),
-      round: form.round.trim(),
-      tags: form.tags.split(',').map(t => t.trim()).filter(Boolean).join(', ')
-    };
+    let standalones = [...(settings.standalone_motions || [])];
+    let compMotions = { ...(settings.comp_motions || {}) };
 
+    // 1. If editing, remove the old motion from its original place
     if (editM) {
-      updated = motions.map(m => m.id === editM.id ? { ...cleanForm } : m);
-      toast('Updated');
-    } else {
-      const newId = motions.reduce((max, m) => Math.max(max, parseInt(m.id || 0, 10)), 0) + 1;
-      updated = [...motions, { ...cleanForm, id: newId }];
-      toast('Added');
+      if (editM.isStandalone) {
+        standalones = standalones.filter(m => m.id !== editM.id);
+      } else {
+        const oldCompId = editM.compId;
+        if (compMotions[oldCompId]) {
+          compMotions[oldCompId] = compMotions[oldCompId].filter((_, idx) => idx !== editM.index);
+          if (compMotions[oldCompId].length === 0) {
+            delete compMotions[oldCompId];
+          }
+        }
+      }
     }
 
-    await saveSetting('standalone_motions', updated);
+    // 2. Insert/Save the new motion to its target place
+    if (form.isStandalone) {
+      const cleanForm = {
+        motion: form.motion.trim(),
+        infoslide: form.infoslide.trim(),
+        round: form.round.trim(),
+        format: form.format,
+        level: form.level,
+        date: form.date,
+        tags: form.tags.split(',').map(t => t.trim()).filter(Boolean).join(', ')
+      };
+
+      if (editM && editM.isStandalone) {
+        cleanForm.id = editM.id;
+      } else {
+        const newId = standalones.reduce((max, m) => Math.max(max, parseInt(m.id || 0, 10)), 0) + 1;
+        cleanForm.id = newId;
+      }
+      standalones.push(cleanForm);
+    } else {
+      const targetCompId = form.compId;
+      const cleanForm = {
+        round: form.round.trim(),
+        motion: form.motion.trim(),
+        infoslide: form.infoslide.trim(),
+        tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean).join(', ') : ''
+      };
+      if (!compMotions[targetCompId]) {
+        compMotions[targetCompId] = [];
+      }
+      compMotions[targetCompId].push(cleanForm);
+    }
+
+    await saveSetting('standalone_motions', standalones);
+    await saveSetting('comp_motions', compMotions);
+
+    toast(editM ? 'Updated' : 'Added');
     setShowForm(false);
     setEditM(null);
   };
 
-  const del = async id => {
-    const updated = motions.filter(m => m.id !== id);
-    await saveSetting('standalone_motions', updated);
+  const del = async motionItem => {
+    if (motionItem.isStandalone) {
+      const standalones = (settings.standalone_motions || []).filter(m => m.id !== motionItem.id);
+      await saveSetting('standalone_motions', standalones);
+    } else {
+      const compMotions = { ...(settings.comp_motions || {}) };
+      const compId = motionItem.compId;
+      if (compMotions[compId]) {
+        compMotions[compId] = compMotions[compId].filter((_, idx) => idx !== motionItem.index);
+        if (compMotions[compId].length === 0) {
+          delete compMotions[compId];
+        }
+      }
+      await saveSetting('comp_motions', compMotions);
+    }
     toast('Deleted');
     setConfirm(null);
   };
@@ -1526,10 +1708,10 @@ function AdminMotions({ settings, saveSetting, toast }) {
     <div className="admin-content">
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}}>
         <div>
-          <h2 style={{fontFamily:'Playfair Display,serif',fontSize:'1.25rem',marginBottom:2}}>Standalone Motions</h2>
-          <p style={{color:'var(--text3)',fontSize:'.78rem'}}>{motions.length} motion{motions.length !== 1 ? 's' : ''} not tied to competitions</p>
+          <h2 style={{fontFamily:'Playfair Display,serif',fontSize:'1.25rem',marginBottom:2}}>Motions Archive</h2>
+          <p style={{color:'var(--text3)',fontSize:'.78rem'}}>{motions.length} motion{motions.length !== 1 ? 's' : ''} in database</p>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => { setEditM(null); setShowForm(true); }}>+ Add Standalone Motion</button>
+        <button className="btn btn-primary btn-sm" onClick={() => { setEditM(null); setShowForm(true); }}>+ Add Motion</button>
       </div>
       <div className="card">
         <div className="tbl-wrap">
@@ -1539,6 +1721,7 @@ function AdminMotions({ settings, saveSetting, toast }) {
                 <th>#</th>
                 <th>Round/Context</th>
                 <th>Motion</th>
+                <th>Type/Source</th>
                 <th>Format</th>
                 <th>Level</th>
                 <th>Tags</th>
@@ -1548,17 +1731,31 @@ function AdminMotions({ settings, saveSetting, toast }) {
             <tbody>
               {motions.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{textAlign:'center',color:'var(--text3)',padding:36}}>
-                    No standalone motions yet. Click "+ Add Standalone Motion" to start.
+                  <td colSpan={8} style={{textAlign:'center',color:'var(--text3)',padding:36}}>
+                    No motions yet. Click "+ Add Motion" to start.
                   </td>
                 </tr>
               )}
               {motions.map((m, i) => (
-                <tr key={m.id || i}>
+                <tr key={m.displayId || i}>
                   <td style={{color:'var(--text3)',fontWeight:600,fontSize:'.72rem'}}>{i + 1}</td>
                   <td style={{fontWeight:600, fontSize:'.78rem', color:'var(--accent)', whiteSpace:'nowrap'}}>{m.round || '—'}</td>
                   <td style={{fontSize:'.82rem', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}} title={m.motion}>
                     {m.motion}
+                  </td>
+                  <td>
+                    <span style={{
+                      fontSize: '.68rem',
+                      fontWeight: 700,
+                      color: m.isStandalone ? 'var(--gold)' : 'var(--text2)',
+                      background: m.isStandalone ? 'rgba(230, 184, 74, 0.08)' : 'var(--surface2)',
+                      border: `1px solid ${m.isStandalone ? 'rgba(230, 184, 74, 0.2)' : 'var(--border)'}`,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {m.sourceLabel}
+                    </span>
                   </td>
                   <td><span className={`badge ${m.format === 'BP' ? 'b-blue' : m.format === 'AP' ? 'b-purple' : 'b-gray'}`}>{m.format || 'None'}</span></td>
                   <td style={{fontSize:'.76rem'}}>{m.level || '—'}</td>
@@ -1568,7 +1765,7 @@ function AdminMotions({ settings, saveSetting, toast }) {
                   <td>
                     <div style={{display:'flex',gap:4}}>
                       <button className="btn btn-outline btn-xs" onClick={() => { setEditM(m); setShowForm(true); }}>Edit</button>
-                      <button className="btn btn-danger btn-xs" onClick={() => setConfirm(m.id)}>Del</button>
+                      <button className="btn btn-danger btn-xs" onClick={() => setConfirm(m)}>Del</button>
                     </div>
                   </td>
                 </tr>
@@ -1577,10 +1774,10 @@ function AdminMotions({ settings, saveSetting, toast }) {
           </table>
         </div>
       </div>
-      {showForm && <MotionForm entry={editM} onSave={addOrUpdate} onClose={() => { setShowForm(false); setEditM(null); }} />}
+      {showForm && <MotionForm entry={editM} competitions={competitions} onSave={addOrUpdate} onClose={() => { setShowForm(false); setEditM(null); }} />}
       {confirm && (
         <Modal title="Delete?" onClose={() => setConfirm(null)} sm>
-          <p style={{color:'var(--text3)'}}>Remove this standalone motion?</p>
+          <p style={{color:'var(--text3)'}}>Remove this motion?</p>
           <div className="m-footer">
             <button className="btn btn-ghost" onClick={() => setConfirm(null)}>Cancel</button>
             <button className="btn btn-danger" onClick={() => del(confirm)}>Delete</button>
@@ -1633,7 +1830,7 @@ function AdminShell2({ onLogout, members, refetchMembers, competitions, refetchC
         {section==='competitions' && <AdminCompetitions competitions={competitions} members={members} refetch={refetchCompetitions} toast={toast} settings={settings} saveSetting={saveSetting} />}
         {section==='boards' && <AdminBoards boards={boards} members={members} refetch={refetchBoards} toast={toast} />}
         {section==='materials' && <AdminStudyMaterials materials={materials} refetch={refetchMaterials} toast={toast} />}
-        {section==='motions' && <AdminMotions settings={settings} saveSetting={saveSetting} toast={toast} />}
+        {section==='motions' && <AdminMotions settings={settings} saveSetting={saveSetting} toast={toast} competitions={competitions} />}
         {section==='hof' && <AdminHallOfFame hof={hof} refetch={refetchHof} toast={toast} />}
         {section==='info' && <AdminInfoEditor info={info} saveInfo={saveInfo} toast={toast} />}
         {section==='settings' && <AdminSettings settings={settings} saveSetting={saveSetting} toast={toast} />}

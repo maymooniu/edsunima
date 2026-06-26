@@ -1874,7 +1874,7 @@ function MotionsTab({ competitions, settings, members }) {
           date: comp.comp_date || '',
           source: comp.code,
           isStandalone: false,
-          tags: []
+          tags: m.tags ? m.tags.split(',').map(t => t.trim()).filter(Boolean) : []
         });
       });
     });
@@ -1908,11 +1908,11 @@ function MotionsTab({ competitions, settings, members }) {
 
   const allTags = useMemo(() => {
     const tagsSet = new Set();
-    standaloneList.forEach(m => {
+    allMotions.forEach(m => {
       m.tags.forEach(t => tagsSet.add(t));
     });
     return Array.from(tagsSet).sort();
-  }, [standaloneList]);
+  }, [allMotions]);
 
   const filtered = useMemo(() => {
     return allMotions.filter(m => {
