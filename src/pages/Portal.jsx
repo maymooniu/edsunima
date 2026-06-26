@@ -1,0 +1,2526 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import supabase from '../supabaseClient';
+import {
+  useMembers,
+  useCompetitions,
+  useSettings,
+  useBoards,
+  useHof,
+  useStudyMaterials,
+  useMotions,
+  useInfoSettings,
+  useUserPrefs,
+  useDragReorder,
+  exportDebaters,
+  exportMembership,
+  exportCompetitions,
+  exportAll,
+  applyAccent
+} from '../hooks/useDatabase';
+
+
+
+
+// ─── TOAST ───────────────────────────────────────────────────────────────────
+function Toast({ msg, type, onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 3000); return () => clearTimeout(t); }, []);
+  return <div className={`toast ${type==='success'?'ok':'err'}`}>{type==='success'?'✓':'✕'} {msg}</div>;
+}
+function useToast() {
+  const [t, setT] = useState(null);
+  const show = (msg, type='success') => setT({ msg, type, k: Date.now() });
+  const el = t && <Toast key={t.k} msg={t.msg} type={t.type} onDone={()=>setT(null)} />;
+  return [show, el];
+}
+
+// ─── LOGO ────────────────────────────────────────────────────────────────────
+function LogoIcon({ logoUrl, size=32, radius=9 }) {
+  return (
+    <div className={`logo-icon ${logoUrl?'':'logo-icon-bg'}`} style={{ width:size, height:size, borderRadius:radius }}>
+      {logoUrl ? <img src={logoUrl} alt="Logo" style={{ borderRadius:radius }} /> : <span className="logo-icon-ph" style={{ fontSize:size*.38+'px' }}>E</span>}
+    </div>
+  );
+}
+
+// ─── BADGES ──────────────────────────────────────────────────────────────────
+function RankBadge({ rank }) {
+  if (rank==='Ace') return <span className="r-ace"><span className="r-icon">✦</span> Ace</span>;
+  if (rank==='Troop') return <span className="r-troop"><span className="r-icon">◆</span> Troop</span>;
+  return <span className="r-trainee">Trainee</span>;
+}
+function DivBadge({ div }) {
+  if (div==='English') return <span className="badge b-eng">EN</span>;
+  if (div==='Indonesia') return <span className="badge b-ind">ID</span>;
+  return <span className="badge b-flex">Flex</span>;
+}
+function StatusBadge({ s }) {
+  return <span className={`badge ${s==='Active'?'b-green':'b-red'}`}>{s}</span>;
+}
+function ClassBadges({ classes=[] }) {
+  const map = { Advisor:'b-gold', Board:'b-blue', General:'b-gray', Alumni:'b-purple', Ex:'b-ex' };
+  return <>{classes.map(c=><span key={c} className={`badge ${map[c]||'b-gray'}`} style={{marginRight:3,marginBottom:2}}>{c}</span>)}</>;
+}
+function FormatBadge({ f }) {
+  return <span className={`badge ${f==='BP'?'b-navy':'b-purple'}`}>{f}</span>;
+}
+
+// ─── TOGGLE ──────────────────────────────────────────────────────────────────
+function Toggle({ checked, onChange }) {
+  return (
+    <label className="toggle">
+      <input type="checkbox" checked={!!checked} onChange={e=>onChange(e.target.checked)} />
+      <div className="toggle-track" />
+      <div className="toggle-thumb" />
+    </label>
+  );
+}
+
+// ─── MODAL ───────────────────────────────────────────────────────────────────
+function Modal({ title, onClose, children, wide, sm }) {
+  useEffect(() => {
+    const fn = e => { if (e.key==='Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, []);
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className={`modal ${wide?'modal-wide':''} ${sm?'modal-sm':''}`}>
+        <div className="m-title">
+          <span>{title}</span>
+          <button className="m-close" onClick={onClose}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── PROFILE MODAL (member detail) ───────────────────────────────────────────
+// ─── PROFILE MODAL (member detail) ───────────────────────────────────────────
+function ProfileModal({ member, competitions, onClose }) {
+  if (!member) return null;
+  const ROLE_CLR = s => {
+    if (['President','Vice President'].includes(s)) return 'b-navy';
+    if (['Secretary','Treasurer'].includes(s)) return 'b-gold';
+    if (s?.includes('Director')) return 'b-blue';
+    if (s?.includes('Officer')) return 'b-purple';
+    return 'b-gray';
+  };
+  const myComps = useMemo(() => {
+    return competitions.filter(c => (c.participants||[]).some(p=>p.memberId===member.id))
+      .map(c => {
+        const p = c.participants.find(p=>p.memberId===member.id);
+        return { id:c.id, code:c.code, competition:c.competition, role:p?.role, result:p?.result||null, date:c.comp_date };
+      });
+  }, [competitions, member.id]);
+
+  const sortedComps = useMemo(() => {
+    return [...myComps].sort((a,b) => b.id - a.id);
+  }, [myComps]);
+
+  const initials = useMemo(() => {
+    return member.full_name?.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase() || 'M';
+  }, [member.full_name]);
+
+  const avatarGradient = useMemo(() => {
+    if (member.division === 'English') return 'linear-gradient(135deg, var(--accent), var(--accent2))';
+    if (member.division === 'Indonesia') return 'linear-gradient(135deg, var(--orange), #f59e0b)';
+    return 'linear-gradient(135deg, var(--magenta), #e879f9)';
+  }, [member.division]);
+
+  const breakRate = useMemo(() => {
+    return member.total_competitions > 0 
+      ? Math.round((member.total_breaking || 0) / member.total_competitions * 100) 
+      : 0;
+  }, [member.total_competitions, member.total_breaking]);
+
+  return (
+    <Modal title="Member Profile" onClose={onClose}>
+      {/* Player Card Header */}
+      <div style={{
+        display:'flex', alignItems:'center', gap:16, 
+        paddingBottom:16, borderBottom:'1px solid var(--border)', marginBottom:16
+      }}>
+        <div style={{
+          width:64, height:64, borderRadius:'50%', 
+          background: avatarGradient, 
+          display:'flex', alignItems:'center', justifyContent:'center', 
+          fontSize:'1.4rem', fontWeight:800, color:'#fff', 
+          boxShadow: '0 4px 14px rgba(0,0,0,.2)', flexShrink:0
+        }}>
+          {initials}
+        </div>
+        <div style={{minWidth:0, flex:1}}>
+          <h3 style={{fontSize:'1.1rem', fontWeight:800, color:'var(--text)', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+            {member.full_name}
+          </h3>
+          <div style={{display:'flex', gap:5, flexWrap:'wrap', alignItems:'center'}}>
+            <span className={`badge ${ROLE_CLR(member.membership_status)}`} style={{fontSize:'.65rem', fontWeight:700}}>
+              {member.membership_status||'Member'}
+            </span>
+            <DivBadge div={member.division}/>
+            <RankBadge rank={member.rank}/>
+            <ClassBadges classes={member.classes}/>
+          </div>
+        </div>
+      </div>
+
+      {/* Identity Grid */}
+      <div style={{
+        display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', 
+        gap:12, marginBottom:16, background:'rgba(255,255,255,.01)', 
+        border:'1px solid var(--border)', borderRadius:'var(--r2)', padding:12
+      }}>
+        {[
+          ['NIM', member.nim||'—'],
+          ['Course / Major', member.course||'—'],
+          ['Email', member.email||'—'],
+          ['WhatsApp', member.whatsapp||'—'],
+        ].map(([k,v])=>(
+          <div key={k} style={{display:'flex', flexDirection:'column', gap:2}}>
+            <span style={{fontSize:'.6rem', color:'var(--text3)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em'}}>{k}</span>
+            <span style={{fontSize:'.78rem', color:'var(--text2)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}} title={v}>{v}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Stats Cards */}
+      <div style={{marginBottom:18}}>
+        <div style={{fontSize:'.68rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', color:'var(--text3)', marginBottom:8}}>Debate Stats</div>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:8}}>
+          {[
+            { label: 'Competitions', val: member.total_competitions || 0, color: 'var(--accent)' },
+            { label: 'Rounds', val: member.total_rounds || 0, color: 'var(--text)' },
+            { label: 'Breaks', val: member.total_breaking || 0, color: 'var(--gold)' },
+            { label: 'Break Rate', val: `${breakRate}%`, color: 'var(--green)' }
+          ].map(stat => (
+            <div key={stat.label} style={{
+              background: 'var(--surface2)', 
+              border: '1px solid var(--border)', 
+              borderRadius: 'var(--r)', 
+              padding: '10px 4px', 
+              textAlign: 'center'
+            }}>
+              <div style={{fontSize: '1.1rem', fontWeight: 800, color: stat.color, lineHeight: 1.1}}>{stat.val}</div>
+              <div style={{fontSize: '.58rem', color: 'var(--text3)', textTransform: 'uppercase', marginTop: 4, fontWeight:600}}>{stat.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Competition Timeline */}
+      {sortedComps.length > 0 && (
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:'.68rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', color:'var(--text3)', marginBottom:12}}>Timeline Tracker ({sortedComps.length})</div>
+          <div style={{position:'relative', paddingLeft: 8, maxHeight:240, overflowY:'auto', paddingRight:6}}>
+            {/* Vertical track line */}
+            <div style={{
+              position:'absolute', left: 16, top: 8, bottom: 8, width: 2, 
+              background: 'var(--border)', zIndex: 0
+            }} />
+
+            {sortedComps.map((c, i) => {
+              const isBreak = c.result && (
+                c.result.toLowerCase().includes('break') || 
+                c.result.toLowerCase().includes('champion') || 
+                c.result.toLowerCase().includes('runner') || 
+                c.result.toLowerCase().includes('speaker') ||
+                c.result.toLowerCase().includes('final')
+              );
+              
+              return (
+                <div key={i} style={{position:'relative', paddingLeft: 32, marginBottom: 14}}>
+                  {/* Timeline Dot */}
+                  <div style={{
+                    position: 'absolute', left: 10, top: 4, width: 14, height: 14, 
+                    borderRadius: '50%', 
+                    background: isBreak ? 'var(--gold)' : 'var(--accent)', 
+                    border: '3px solid var(--surface)',
+                    boxShadow: isBreak ? '0 0 8px rgba(223,170,50,.45)' : 'none',
+                    zIndex: 1
+                  }} />
+
+                  {/* Node Card */}
+                  <div style={{
+                    background: 'var(--surface2)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--r)',
+                    padding: '8px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10
+                  }}>
+                    <div style={{minWidth: 0, flex: 1}}>
+                      <div style={{display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', marginBottom:2}}>
+                        <span style={{fontWeight: 700, fontSize: '.76rem', color: 'var(--accent)'}}>{c.code}</span>
+                        {c.date && <span style={{fontSize: '.62rem', color: 'var(--text3)'}}>· {c.date}</span>}
+                      </div>
+                      <div style={{fontSize: '.78rem', color: 'var(--text)', fontWeight: 500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                        {c.competition}
+                      </div>
+                    </div>
+                    <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:2, flexShrink:0}}>
+                      <span className={`badge ${c.role==='Debater'?'b-blue':'b-purple'}`} style={{fontSize:'.6rem', fontWeight:700}}>{c.role}</span>
+                      {c.result && (
+                        <span style={{
+                          fontSize: '.68rem', 
+                          fontWeight: 700, 
+                          color: isBreak ? 'var(--gold)' : 'var(--green)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3
+                        }}>
+                          {isBreak ? '🏆' : '✓'} {c.result}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <div className="m-footer"><button className="btn btn-ghost" onClick={onClose}>Close</button></div>
+    </Modal>
+  );
+}
+
+// ─── COMPETITION MODAL (participants) ─────────────────────────────────────────
+function CompParticipantsModal({ comp, members, onClose, settings = {}, motions = [] }) {
+  if (!comp) return null;
+  const compMotions = useMemo(() => {
+    return motions.filter(m => m.competition_id === comp.id);
+  }, [motions, comp.id]);
+  const hasMotions = compMotions.length > 0;
+  const [activeTab, setActiveTab] = useState('participants');
+
+  const participants = comp.participants || [];
+  const adjudicators = participants.filter(p=>p.role==='Adjudicator');
+  const debaters = participants.filter(p=>p.role==='Debater');
+  const getMember = id => members.find(m=>m.id===id);
+
+  const ParticipantRow = ({ p }) => {
+    const m = getMember(p.memberId);
+    if (!m) return null;
+    return (
+      <tr>
+        <td style={{fontWeight:600}}>{m.full_name}</td>
+        <td><DivBadge div={m.division}/></td>
+        <td><RankBadge rank={m.rank}/></td>
+        <td><span className={`badge ${p.role==='Debater'?'b-blue':'b-purple'}`}>{p.role}</span></td>
+        <td style={{color:p.result?'var(--green)':'var(--text3)',fontSize:'.76rem',fontStyle:p.result?'normal':'italic'}}>{p.result||'—'}</td>
+      </tr>
+    );
+  };
+
+  return (
+    <Modal title={`${comp.code}`} onClose={onClose} wide>
+      <p style={{fontSize:'.8rem',color:'var(--text3)',marginBottom:14}}>{comp.competition}{comp.comp_date&&<span style={{marginLeft:8,color:'var(--text3)'}}>· {comp.comp_date}</span>}</p>
+      
+      {hasMotions && (
+        <div style={{ display: 'flex', gap: 12, borderBottom: '1px solid var(--border)', marginBottom: 16, paddingBottom: 4 }}>
+          <button 
+            onClick={() => setActiveTab('participants')}
+            style={{
+              padding: '6px 16px',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'participants' ? '2px solid var(--accent)' : '2px solid transparent',
+              color: activeTab === 'participants' ? 'var(--text)' : 'var(--text3)',
+              fontWeight: activeTab === 'participants' ? 700 : 500,
+              fontSize: '.82rem',
+              cursor: 'pointer',
+              transition: 'all .15s'
+            }}
+          >
+            👥 Participants ({participants.length})
+          </button>
+          <button 
+            onClick={() => setActiveTab('motions')}
+            style={{
+              padding: '6px 16px',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'motions' ? '2px solid var(--accent)' : '2px solid transparent',
+              color: activeTab === 'motions' ? 'var(--text)' : 'var(--text3)',
+              fontWeight: activeTab === 'motions' ? 700 : 500,
+              fontSize: '.82rem',
+              cursor: 'pointer',
+              transition: 'all .15s'
+            }}
+          >
+            📜 Motions ({compMotions.length})
+          </button>
+        </div>
+      )}
+
+      {(activeTab === 'participants' || !hasMotions) ? (
+        !participants.length ? (
+          <p style={{color:'var(--text3)',fontSize:'.85rem',textAlign:'center',padding:20}}>No participants recorded.</p>
+        ) : (
+          <>
+            {adjudicators.length > 0 && (
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:'.66rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--purple)',marginBottom:8}}>Adjudicators ({adjudicators.length})</div>
+                <div className="tbl-wrap">
+                  <table>
+                    <thead><tr><th>Name</th><th>Division</th><th>Rank</th><th>Role</th><th>Result</th></tr></thead>
+                    <tbody>{adjudicators.map((p,i)=><ParticipantRow key={i} p={p}/>)}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {debaters.length > 0 && (
+              <div>
+                <div style={{fontSize:'.66rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--blue)',marginBottom:8}}>Debaters ({debaters.length})</div>
+                <div className="tbl-wrap">
+                  <table>
+                    <thead><tr><th>Name</th><th>Division</th><th>Rank</th><th>Role</th><th>Result</th></tr></thead>
+                    <tbody>{debaters.map((p,i)=><ParticipantRow key={i} p={p}/>)}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '4px 0' }}>
+          {compMotions.map((m, idx) => (
+            <div key={idx} style={{
+              background: 'var(--surface2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--r)',
+              padding: 14,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: '.76rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{m.round}</span>
+              </div>
+              <div style={{ 
+                fontStyle: 'italic', 
+                fontSize: '1rem', 
+                fontWeight: 600, 
+                color: 'var(--text)', 
+                lineHeight: 1.4,
+                padding: '4px 0'
+              }}>
+                "{m.motion}"
+              </div>
+              {m.infoslide && (
+                <div style={{ 
+                  fontSize: '.78rem', 
+                  color: 'var(--text3)', 
+                  background: 'var(--surface)', 
+                  borderLeft: '3px solid var(--border2)', 
+                  padding: '8px 12px', 
+                  borderRadius: 4,
+                  whiteSpace: 'pre-line',
+                  marginTop: 4
+                }}>
+                  <div style={{ fontWeight: 700, fontSize: '.68rem', textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text2)', marginBottom: 4 }}>Info Slide</div>
+                  {m.infoslide}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="m-footer"><button className="btn btn-ghost" onClick={onClose}>Close</button></div>
+    </Modal>
+  );
+}
+
+// ─── DEBATERS TAB ─────────────────────────────────────────────────────────────
+function DebatersTab({ members, loading, settings = {}, competitions }) {
+  const [search, setSearch] = useState('');
+  const [fDiv, setFDiv] = useState('All');
+  const [fRank, setFRank] = useState('All');
+  const [sortField, setSortField] = useState(null);
+  const [sortDir, setSortDir] = useState('desc');
+  const [profile, setProfile] = useState(null);
+
+  const toggleSort = field => {
+    if (sortField===field && sortDir==='asc') { setSortField(null); setSortDir('desc'); }
+    else if (sortField===field) setSortDir(d=>d==='desc'?'asc':'desc');
+    else { setSortField(field); setSortDir('desc'); }
+  };
+
+  const sorted = useMemo(() => {
+    let arr = members.filter(m=>{
+      const s=search.toLowerCase();
+      return (!s||m.full_name?.toLowerCase().includes(s))
+        && (fDiv==='All'||m.division===fDiv)
+        && (fRank==='All'||m.rank===fRank);
+    });
+    if (sortField) {
+      const key = sortField==='comps'?'total_competitions':sortField==='rounds'?'total_rounds':'total_breaking';
+      arr = [...arr].sort((a,b)=>sortDir==='desc'?(b[key]||0)-(a[key]||0):(a[key]||0)-(b[key]||0));
+    }
+    return arr;
+  }, [members, search, fDiv, fRank, sortField, sortDir]);
+
+  const itemsPerPage = settings.items_per_page === 'All' ? Infinity : parseInt(settings.items_per_page || '50', 10);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => { setPage(1); }, [search, fDiv, fRank, itemsPerPage]);
+
+  const totalPages = Math.ceil(sorted.length / itemsPerPage);
+  const paginatedData = useMemo(() => {
+    if (itemsPerPage === Infinity) return sorted;
+    const start = (page - 1) * itemsPerPage;
+    return sorted.slice(start, start + itemsPerPage);
+  }, [sorted, page, itemsPerPage]);
+
+  const counts = { total:members.length, ace:members.filter(m=>m.rank==='Ace').length, troop:members.filter(m=>m.rank==='Troop').length, trainee:members.filter(m=>m.rank==='Trainee').length };
+
+  const thSort = (field, label) => {
+    const cls = sortField===field ? sortDir : '';
+    return <th className={`th-sort ${cls}`} onClick={()=>toggleSort(field)} style={{textAlign:'center'}}>{label}</th>;
+  };
+
+  return (
+    <div className="pub-content">
+      <div className="pg-head"><h2>Debaters</h2><p>Performance overview · {members.length} members · click a row for details</p></div>
+
+      {settings.show_stats_on_public && (
+        <div className="stat-grid">
+          {[
+            ['👥','Total',counts.total,'rgba(108,143,255,.15)'],
+            ['✦','Ace',counts.ace,'rgba(230,184,74,.15)'],
+            ['◆','Troop',counts.troop,'rgba(96,165,250,.15)'],
+            ['○','Trainee',counts.trainee,'rgba(255,255,255,.07)']
+          ].map(([icon,lbl,val,bg])=>(
+            <div key={lbl} className="stat-chip">
+              <div className="stat-chip-icon" style={{background:bg}}>{icon}</div>
+              <div><div className="stat-chip-val">{val}</div><div className="stat-chip-lbl">{lbl}</div></div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="toolbar">
+        {settings.allow_public_search !== false ? (
+          <div className="search-wrap">
+            <span className="search-ico">⌕</span>
+            <input placeholder="Search name…" value={search} onChange={e=>setSearch(e.target.value)} />
+          </div>
+        ) : (
+          <div className="search-wrap">
+            <span className="search-ico">⌕</span>
+            <input placeholder="Search disabled by administrator" disabled style={{opacity:0.6,cursor:'not-allowed'}} />
+          </div>
+        )}
+        <select className="filter-sel" value={fDiv} onChange={e=>setFDiv(e.target.value)}>{['All','English','Indonesia','Flex'].map(o=><option key={o}>{o}</option>)}</select>
+        <select className="filter-sel" value={fRank} onChange={e=>setFRank(e.target.value)}>{['All','Ace','Troop','Trainee'].map(o=><option key={o}>{o}</option>)}</select>
+        {sortField && <button className="btn btn-outline btn-sm" onClick={()=>{setSortField(null);setSortDir('desc');}} title="Reset sort">↺ Reset Sort</button>}
+      </div>
+
+      <div className="card">
+        <div className="tbl-wrap">
+          {loading ? <div className="data-loading"><div className="spin"/><span>Loading…</span></div> : (
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Full Name</th>
+                  <th>Div</th>
+                  <th>Rank</th>
+                  <th>Class</th>
+                  {thSort('comps','Comps')}
+                  {thSort('rounds','Rounds')}
+                  {thSort('breaks','Breaks')}
+                  <th>Top Round</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.length===0 ? <tr><td colSpan={9} style={{textAlign:'center',color:'var(--text3)',padding:36}}>No results</td></tr>
+                : paginatedData.map((m,i)=>(
+                  <tr key={m.id} className="tr-click" onClick={()=>setProfile(m)}>
+                    <td style={{color:'var(--text3)',fontWeight:600,fontSize:'.72rem'}}>{(itemsPerPage === Infinity ? 0 : (page - 1) * itemsPerPage) + i + 1}</td>
+                    <td style={{fontWeight:600}}>{m.full_name}</td>
+                    <td><DivBadge div={m.division}/></td>
+                    <td><RankBadge rank={m.rank}/></td>
+                    <td><ClassBadges classes={m.classes}/></td>
+                    <td style={{textAlign:'center',fontWeight:700,color:'var(--accent)'}}>{m.total_competitions??0}</td>
+                    <td style={{textAlign:'center',fontWeight:600}}>{m.total_rounds??0}</td>
+                    <td style={{textAlign:'center',fontWeight:600,color:(m.total_breaking>0)?'var(--gold)':'var(--text3)'}}>{m.total_breaking??0}</td>
+                    <td style={{fontSize:'.75rem',color:m.top_round?'var(--green)':'var(--text3)',fontStyle:m.top_round?'normal':'italic',maxWidth:140}}>{m.top_round||'—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+      {totalPages > 1 && (
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14,padding:'0 4px',flexWrap:'wrap',gap:10}}>
+          <div style={{fontSize:'.76rem',color:'var(--text2)'}}>
+            Showing {Math.min(sorted.length, (page - 1) * itemsPerPage + 1)}-{Math.min(sorted.length, page * itemsPerPage)} of {sorted.length} entries
+          </div>
+          <div style={{display:'flex',gap:6,alignItems:'center'}}>
+            <button className="btn btn-ghost btn-xs" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>← Prev</button>
+            <span style={{fontSize:'.76rem',color:'var(--text)',fontWeight:600}}>Page {page} of {totalPages}</span>
+            <button className="btn btn-ghost btn-xs" disabled={page === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next →</button>
+          </div>
+        </div>
+      )}
+      {profile && <ProfileModal member={profile} competitions={competitions} onClose={()=>setProfile(null)} />}
+    </div>
+  );
+}
+
+// ─── COMPETITIONS TAB ─────────────────────────────────────────────────────────
+function CompetitionsTab({ competitions, members, loading, settings = {}, motions = [] }) {
+  const [search, setSearch] = useState('');
+  const [fFmt, setFFmt] = useState('All');
+  const [viewComp, setViewComp] = useState(null);
+
+  const filtered = useMemo(() => competitions.filter(c=>{
+    const s=search.toLowerCase();
+    return (!s||c.competition?.toLowerCase().includes(s)||c.code?.toLowerCase().includes(s))
+      && (fFmt==='All'||c.format===fFmt);
+  }), [competitions,search,fFmt]);
+
+  const itemsPerPage = settings.items_per_page === 'All' ? Infinity : parseInt(settings.items_per_page || '50', 10);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => { setPage(1); }, [search, fFmt, itemsPerPage]);
+
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const paginatedData = useMemo(() => {
+    if (itemsPerPage === Infinity) return filtered;
+    const start = (page - 1) * itemsPerPage;
+    return filtered.slice(start, start + itemsPerPage);
+  }, [filtered, page, itemsPerPage]);
+
+  const byLevel = useMemo(() => {
+    const map = {};
+    competitions.forEach(c=>{ map[c.level]=(map[c.level]||0)+1; });
+    return map;
+  }, [competitions]);
+
+  const LEVEL_ORDER = ['International','National','Regional','Provincial','University'];
+  const levelIcons = { International:'🌏', National:'🇮🇩', Regional:'🗺️', Provincial:'📍', University:'🎓' };
+  const levelColors = { International:'rgba(192,132,252,.15)', National:'rgba(108,143,255,.15)', Regional:'rgba(52,211,153,.12)', Provincial:'rgba(251,146,60,.12)', University:'rgba(230,184,74,.15)' };
+
+  return (
+    <div className="pub-content">
+      <div className="pg-head"><h2>Competitions</h2><p>All competitions EDS UNIMA has participated in · click any row to see participants</p></div>
+
+      {settings.show_stats_on_public !== false && (
+        <div className="stat-grid">
+          {[['🏆','Total',competitions.length,'rgba(230,184,74,.15)'],['⚡','BP',competitions.filter(c=>c.format==='BP').length,'rgba(108,143,255,.15)'],['🌐','AP',competitions.filter(c=>c.format==='AP').length,'rgba(192,132,252,.15)']].map(([icon,lbl,val,bg])=>(
+            <div key={lbl} className="stat-chip"><div className="stat-chip-icon" style={{background:bg}}>{icon}</div><div><div className="stat-chip-val">{val}</div><div className="stat-chip-lbl">{lbl}</div></div></div>
+          ))}
+          {LEVEL_ORDER.filter(l=>byLevel[l]).map(l=>(
+            <div key={l} className="stat-chip"><div className="stat-chip-icon" style={{background:levelColors[l]}}>{levelIcons[l]}</div><div><div className="stat-chip-val">{byLevel[l]}</div><div className="stat-chip-lbl">{l}</div></div></div>
+          ))}
+        </div>
+      )}
+
+      <div className="toolbar">
+        {settings.allow_public_search !== false ? (
+          <div className="search-wrap">
+            <span className="search-ico">⌕</span>
+            <input placeholder="Search competition…" value={search} onChange={e=>setSearch(e.target.value)} />
+          </div>
+        ) : (
+          <div className="search-wrap">
+            <span className="search-ico">⌕</span>
+            <input placeholder="Search disabled by administrator" disabled style={{opacity:0.6,cursor:'not-allowed'}} />
+          </div>
+        )}
+        <select className="filter-sel" value={fFmt} onChange={e=>setFFmt(e.target.value)}>{['All','BP','AP'].map(o=><option key={o}>{o}</option>)}</select>
+      </div>
+      <div className="card">
+        <div className="tbl-wrap">
+          {loading ? <div className="data-loading"><div className="spin"/><span>Loading…</span></div> : (
+            <table>
+              <thead><tr><th>#</th><th>Code</th><th>Competition</th><th>Date</th><th>Fmt</th><th>Level</th><th>Results</th><th>Setting</th><th>Participants</th><th>Tab</th></tr></thead>
+              <tbody>
+                {filtered.length===0 ? <tr><td colSpan={10} style={{textAlign:'center',color:'var(--text3)',padding:36}}>No results</td></tr>
+                : paginatedData.map((c,i)=>(
+                  <tr key={c.id} className="tr-click" onClick={()=>setViewComp(c)}>
+                    <td style={{color:'var(--text3)',fontWeight:600,fontSize:'.72rem'}}>{(itemsPerPage === Infinity ? 0 : (page - 1) * itemsPerPage) + i + 1}</td>
+                    <td style={{fontWeight:700,color:'var(--accent)',whiteSpace:'nowrap',fontSize:'.78rem'}}>{c.code}</td>
+                    <td style={{fontSize:'.81rem',maxWidth:160}}>{c.competition}</td>
+                    <td style={{fontSize:'.72rem',color:'var(--text3)',whiteSpace:'nowrap'}}>{c.comp_date||'—'}</td>
+                    <td><FormatBadge f={c.format}/></td>
+                    <td style={{fontSize:'.76rem',whiteSpace:'nowrap'}}>{c.level}</td>
+                    <td>{(c.results||[]).length>0?<div className="result-tags">{c.results.map((r,i)=><span key={i} className="badge b-green" style={{fontSize:'.65rem'}}>{r}</span>)}</div>:<span style={{color:'var(--text3)',fontSize:'.75rem'}}>—</span>}</td>
+                    <td><span className="badge b-gray" style={{fontSize:'.65rem'}}>{c.setting||'—'}</span></td>
+                    <td style={{textAlign:'center',color:'var(--text2)',fontSize:'.78rem'}}>{(c.participants||[]).length}</td>
+                    <td onClick={e=>e.stopPropagation()}>{c.tabulation?<a href={c.tabulation} target="_blank" rel="noreferrer" style={{color:'var(--accent)',fontSize:'.76rem',fontWeight:600}}>Link ↗</a>:<span style={{color:'var(--text3)',fontSize:'.75rem'}}>—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+      {totalPages > 1 && (
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14,padding:'0 4px',flexWrap:'wrap',gap:10}}>
+          <div style={{fontSize:'.76rem',color:'var(--text2)'}}>
+            Showing {Math.min(filtered.length, (page - 1) * itemsPerPage + 1)}-{Math.min(filtered.length, page * itemsPerPage)} of {filtered.length} entries
+          </div>
+          <div style={{display:'flex',gap:6,alignItems:'center'}}>
+            <button className="btn btn-ghost btn-xs" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>← Prev</button>
+            <span style={{fontSize:'.76rem',color:'var(--text)',fontWeight:600}}>Page {page} of {totalPages}</span>
+            <button className="btn btn-ghost btn-xs" disabled={page === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next →</button>
+          </div>
+        </div>
+      )}
+      {viewComp && <CompParticipantsModal comp={viewComp} members={members} onClose={()=>setViewComp(null)} settings={settings} motions={motions} />}
+    </div>
+  );
+}
+
+// ─── MEMBERSHIP TAB ───────────────────────────────────────────────────────────
+function MembershipTab({ members, loading, competitions, settings = {} }) {
+  const [search, setSearch] = useState('');
+  const [fStatus, setFStatus] = useState('All');
+  const [fDiv, setFDiv] = useState('All');
+  const [profile, setProfile] = useState(null);
+
+  const sortedMembers = useMemo(() => [...members].sort((a,b)=>(a.order_membership||0)-(b.order_membership||0)), [members]);
+  const nonAlumni = useMemo(() => sortedMembers.filter(m=>!m.classes?.includes('Alumni')&&!m.classes?.includes('Ex')), [sortedMembers]);
+  const filtered = useMemo(() => nonAlumni.filter(m=>{
+    const s=search.toLowerCase();
+    return (!s||m.full_name?.toLowerCase().includes(s)||m.nim?.includes(s)||m.course?.toLowerCase().includes(s))
+      && (fStatus==='All'||m.active_status===fStatus)
+      && (fDiv==='All'||m.division===fDiv);
+  }), [nonAlumni,search,fStatus,fDiv]);
+
+  const itemsPerPage = settings.items_per_page === 'All' ? Infinity : parseInt(settings.items_per_page || '50', 10);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => { setPage(1); }, [search, fStatus, fDiv, itemsPerPage]);
+
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const paginatedData = useMemo(() => {
+    if (itemsPerPage === Infinity) return filtered;
+    const start = (page - 1) * itemsPerPage;
+    return filtered.slice(start, start + itemsPerPage);
+  }, [filtered, page, itemsPerPage]);
+
+  const ROLE_CLR = s => {
+    if (['President','Vice President'].includes(s)) return 'b-navy';
+    if (['Secretary','Treasurer'].includes(s)) return 'b-gold';
+    if (s?.includes('Director')) return 'b-blue';
+    if (s?.includes('Officer')) return 'b-purple';
+    return 'b-gray';
+  };
+
+  return (
+    <div className="pub-content">
+      <div className="pg-head"><h2>Membership</h2><p>Complete organizational member directory · click a row for details</p></div>
+
+      {settings.show_stats_on_public !== false && (
+        <div className="stat-grid">
+          {[['📋','Total',nonAlumni.length,'rgba(108,143,255,.15)'],['✓','Active',nonAlumni.filter(m=>m.active_status==='Active').length,'rgba(52,211,153,.15)'],['✗','Inactive',nonAlumni.filter(m=>m.active_status==='Inactive').length,'rgba(248,113,113,.12)']].map(([icon,lbl,val,bg])=>(
+            <div key={lbl} className="stat-chip"><div className="stat-chip-icon" style={{background:bg}}>{icon}</div><div><div className="stat-chip-val">{val}</div><div className="stat-chip-lbl">{lbl}</div></div></div>
+          ))}
+        </div>
+      )}
+
+      <div className="toolbar">
+        {settings.allow_public_search !== false ? (
+          <div className="search-wrap"><span className="search-ico">⌕</span><input placeholder="Search name, NIM, course…" value={search} onChange={e=>setSearch(e.target.value)} /></div>
+        ) : (
+          <div className="search-wrap"><span className="search-ico">⌕</span><input placeholder="Search disabled by administrator" disabled style={{opacity:0.6,cursor:'not-allowed'}} /></div>
+        )}
+        <select className="filter-sel" value={fStatus} onChange={e=>setFStatus(e.target.value)}>{['All','Active','Inactive'].map(o=><option key={o}>{o}</option>)}</select>
+        <select className="filter-sel" value={fDiv} onChange={e=>setFDiv(e.target.value)}>{['All','English','Indonesia','Flex'].map(o=><option key={o}>{o}</option>)}</select>
+      </div>
+
+      <div className="card">
+        <div className="tbl-wrap">
+          {loading ? <div className="data-loading"><div className="spin"/><span>Loading…</span></div> : (
+            <table>
+              <thead><tr><th>#</th><th>Full Name</th><th>NIM</th><th>Course</th><th>Div</th><th>Role</th><th>Rank</th><th>Class</th><th>Status</th><th>Email</th><th>WA</th></tr></thead>
+              <tbody>
+                {filtered.length===0 ? <tr><td colSpan={11} style={{textAlign:'center',color:'var(--text3)',padding:36}}>No results</td></tr>
+                : paginatedData.map((m,i)=>(
+                  <tr key={m.id} className="tr-click" onClick={()=>setProfile(m)}>
+                    <td style={{color:'var(--text3)',fontWeight:600,fontSize:'.72rem'}}>{(itemsPerPage === Infinity ? 0 : (page - 1) * itemsPerPage) + i + 1}</td>
+                    <td style={{fontWeight:600,whiteSpace:'nowrap'}}>{m.full_name}</td>
+                    <td style={{fontFamily:'monospace',fontSize:'.73rem',color:'var(--text3)'}}>{m.nim||'—'}</td>
+                    <td style={{fontSize:'.76rem',maxWidth:120}}>{m.course||'—'}</td>
+                    <td><DivBadge div={m.division}/></td>
+                    <td><span className={`badge ${ROLE_CLR(m.membership_status)}`} style={{fontSize:'.65rem'}}>{m.membership_status||'Member'}</span></td>
+                    <td><RankBadge rank={m.rank}/></td>
+                    <td><ClassBadges classes={m.classes}/></td>
+                    <td><StatusBadge s={m.active_status}/></td>
+                    <td style={{fontSize:'.72rem',color:'var(--text3)',maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.email||'—'}</td>
+                    <td style={{fontSize:'.72rem',color:'var(--text3)'}}>{m.whatsapp||'—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+      {totalPages > 1 && (
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14,padding:'0 4px',flexWrap:'wrap',gap:10}}>
+          <div style={{fontSize:'.76rem',color:'var(--text2)'}}>
+            Showing {Math.min(filtered.length, (page - 1) * itemsPerPage + 1)}-{Math.min(filtered.length, page * itemsPerPage)} of {filtered.length} entries
+          </div>
+          <div style={{display:'flex',gap:6,alignItems:'center'}}>
+            <button className="btn btn-ghost btn-xs" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>← Prev</button>
+            <span style={{fontSize:'.76rem',color:'var(--text)',fontWeight:600}}>Page {page} of {totalPages}</span>
+            <button className="btn btn-ghost btn-xs" disabled={page === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next →</button>
+          </div>
+        </div>
+      )}
+      {profile && <ProfileModal member={profile} competitions={competitions} onClose={()=>setProfile(null)} />}
+    </div>
+  );
+}
+
+// ─── PUBLIC DASHBOARD (Stats) ────────────────────────────────────────────────
+// ─── SVG DONUT CHART ─────────────────────────────────────────────────────────
+function DonutChart({ bp, ap }) {
+  const total = bp + ap;
+  const radius = 35;
+  const circ = 2 * Math.PI * radius; // ~219.9
+  const pctBP = total ? (bp / total) * 100 : 0;
+  const pctAP = total ? (ap / total) * 100 : 0;
+  const bpOffset = 0;
+  const apOffset = total ? (bp / total) * circ : 0;
+
+  return (
+    <div style={{display:'flex', alignItems:'center', gap:24, justifyContent:'center', padding:'16px 0'}}>
+      <div style={{position:'relative', width:110, height:110, flexShrink:0}}>
+        <svg viewBox="0 0 100 100" style={{transform:'rotate(-90deg)', width:'100%', height:'100%'}}>
+          {/* Background circle */}
+          <circle cx="50" cy="50" r={radius} fill="none" stroke="var(--border)" strokeWidth="10" />
+          {/* BP slice */}
+          {bp > 0 && (
+            <circle 
+              cx="50" cy="50" r={radius} 
+              fill="none" 
+              stroke="var(--accent)" 
+              strokeWidth="10" 
+              strokeDasharray={`${(bp/total)*circ} ${circ}`} 
+              strokeDashoffset={-bpOffset}
+              strokeLinecap="round"
+              style={{transition:'all .3s'}}
+            />
+          )}
+          {/* AP slice */}
+          {ap > 0 && (
+            <circle 
+              cx="50" cy="50" r={radius} 
+              fill="none" 
+              stroke="var(--accent2)" 
+              strokeWidth="10" 
+              strokeDasharray={`${(ap/total)*circ} ${circ}`} 
+              strokeDashoffset={-apOffset}
+              strokeLinecap="round"
+              style={{transition:'all .3s'}}
+            />
+          )}
+        </svg>
+        <div style={{
+          position:'absolute', inset:0, display:'flex', flexDirection:'column',
+          alignItems:'center', justifyContent:'center', pointerEvents:'none'
+        }}>
+          <span style={{fontSize:'1.05rem', fontWeight:800, color:'var(--text)', lineHeight:1}}>{total}</span>
+          <span style={{fontSize:'.55rem', color:'var(--text3)', textTransform:'uppercase', fontWeight:600, letterSpacing:'.05em'}}>Tourneys</span>
+        </div>
+      </div>
+      <div style={{display:'flex', flexDirection:'column', gap:10}}>
+        <div style={{display:'flex', alignItems:'center', gap:8}}>
+          <div style={{width:9, height:9, borderRadius:'50%', background:'var(--accent)'}} />
+          <div>
+            <div style={{fontSize:'.76rem', fontWeight:700, color:'var(--text)'}}>BP Format ({bp})</div>
+            <div style={{fontSize:'.65rem', color:'var(--text2)'}}>{pctBP.toFixed(0)}% of tournaments</div>
+          </div>
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:8}}>
+          <div style={{width:9, height:9, borderRadius:'50%', background:'var(--accent2)'}} />
+          <div>
+            <div style={{fontSize:'.76rem', fontWeight:700, color:'var(--text)'}}>AP Format ({ap})</div>
+            <div style={{fontSize:'.65rem', color:'var(--text2)'}}>{pctAP.toFixed(0)}% of tournaments</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SVG LEVEL COLUMN CHART ──────────────────────────────────────────────────
+function LevelColumnChart({ byLevel, maxVal }) {
+  const levels = ['International', 'National', 'Regional', 'Provincial', 'University'];
+  const colors = {
+    International: 'var(--accent2)',
+    National: 'var(--accent)',
+    Regional: 'var(--green)',
+    Provincial: 'var(--orange)',
+    University: 'var(--gold)'
+  };
+  const labelMap = {
+    International: 'Intl',
+    National: 'Nat',
+    Regional: 'Reg',
+    Provincial: 'Prov',
+    University: 'Univ'
+  };
+
+  const chartHeight = 100;
+  const chartWidth = 240;
+  const paddingLeft = 20;
+  const paddingBottom = 20;
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', alignItems:'center', padding:'10px 0'}}>
+      <svg width={chartWidth + paddingLeft} height={chartHeight + paddingBottom} style={{overflow:'visible'}}>
+        {/* Y Axis Grid lines */}
+        {[0, 0.5, 1].map((ratio, idx) => {
+          const y = chartHeight - (ratio * chartHeight);
+          const gridVal = Math.round(ratio * maxVal);
+          return (
+            <g key={idx}>
+              <line x1={paddingLeft} y1={y} x2={chartWidth} y2={y} stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
+              <text x={paddingLeft - 6} y={y + 3} fill="var(--text3)" fontSize=".6rem" textAnchor="end">{gridVal}</text>
+            </g>
+          );
+        })}
+
+        {/* Bars */}
+        {levels.map((level, idx) => {
+          const val = byLevel[level] || 0;
+          const barHeight = maxVal > 0 ? (val / maxVal) * chartHeight : 0;
+          const barWidth = 24;
+          const spacing = (chartWidth - paddingLeft) / levels.length;
+          const x = paddingLeft + (idx * spacing) + (spacing - barWidth) / 2;
+          const y = chartHeight - barHeight;
+
+          return (
+            <g key={level} style={{cursor:'pointer'}}>
+              {/* Bar */}
+              <rect 
+                x={x} y={y} width={barWidth} height={Math.max(barHeight, 2)} 
+                rx="3" ry="3"
+                fill={colors[level]} 
+                opacity={val > 0 ? 0.85 : 0.25}
+                style={{transition:'all .3s'}}
+                onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = val > 0 ? '0.85' : '0.25'; }}
+              />
+              {/* Value label on top of bar */}
+              {val > 0 && (
+                <text x={x + barWidth/2} y={y - 4} fill="var(--text2)" fontSize=".65rem" fontWeight="bold" textAnchor="middle">{val}</text>
+              )}
+              {/* X Axis Label */}
+              <text x={x + barWidth/2} y={chartHeight + 14} fill="var(--text3)" fontSize=".62rem" textAnchor="middle">{labelMap[level]}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// ─── PUBLIC DASHBOARD (Stats) ────────────────────────────────────────────────
+function PublicDashboard({ members, competitions, materials = [], loading, motions = [] }) {
+  if (loading) return <div className="data-loading"><div className="spin"/><span>Loading stats…</span></div>;
+
+  const nonAlumni = members.filter(m=>!m.classes?.includes('Alumni')&&!m.classes?.includes('Ex'));
+  const active = nonAlumni.filter(m=>m.active_status==='Active');
+  const totalRounds = members.reduce((s,m)=>s+(m.total_rounds||0),0);
+  const totalBreaks = members.reduce((s,m)=>s+(m.total_breaking||0),0);
+  const byDiv = { English:members.filter(m=>m.division==='English').length, Indonesia:members.filter(m=>m.division==='Indonesia').length, Flex:members.filter(m=>m.division==='Flex').length };
+  const byRank = { Ace:nonAlumni.filter(m=>m.rank==='Ace').length, Troop:nonAlumni.filter(m=>m.rank==='Troop').length, Trainee:nonAlumni.filter(m=>m.rank==='Trainee').length };
+  const topRounds = [...members].sort((a,b)=>(b.total_rounds||0)-(a.total_rounds||0)).slice(0,10);
+  const topBreaks = [...members].sort((a,b)=>(b.total_breaking||0)-(a.total_breaking||0)).slice(0,10);
+  const byLevel = {}; competitions.forEach(c=>{byLevel[c.level]=(byLevel[c.level]||0)+1;});
+  const maxDiv = Math.max(...Object.values(byDiv), 1);
+  const maxRank = Math.max(...Object.values(byRank), 1);
+
+  // Motions Analytics calculations
+  const bpMotionsCount = motions.filter(m => {
+    const comp = m.competition_id ? competitions.find(c => c.id === m.competition_id) : null;
+    return comp ? comp.format === 'BP' : m.format === 'BP';
+  }).length;
+  const apMotionsCount = motions.filter(m => {
+    const comp = m.competition_id ? competitions.find(c => c.id === m.competition_id) : null;
+    return comp ? comp.format === 'AP' : m.format === 'AP';
+  }).length;
+  const standaloneCount = motions.filter(m => !m.competition_id).length;
+  const compTiedCount = motions.filter(m => m.competition_id).length;
+  const totalFormat = Math.max(bpMotionsCount + apMotionsCount, 1);
+  const totalScope = Math.max(standaloneCount + compTiedCount, 1);
+
+  const tagCounts = {};
+  motions.forEach(m => {
+    if (m.tags) {
+      m.tags.split(',').forEach(tag => {
+        const trimmed = tag.trim();
+        if (trimmed) {
+          tagCounts[trimmed] = (tagCounts[trimmed] || 0) + 1;
+        }
+      });
+    }
+  });
+  const sortedTags = Object.entries(tagCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  const maxTagCount = sortedTags.length > 0 ? Math.max(...sortedTags.map(t => t[1])) : 1;
+
+  return (
+    <div className="pub-content">
+      <div className="pg-head">
+        <h2>Stats & Overview</h2>
+        <p>EDS UNIMA at a glance — {members.length} members · {competitions.length} competitions · {materials.length} study materials</p>
+      </div>
+
+      <div className="dash-stat-grid" style={{gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',marginBottom:16}}>
+        {[
+          ['Members', members.length, `${active.length} active · ${members.filter(m=>m.classes?.includes('Alumni')||m.classes?.includes('Ex')).length} alumni/ex`, 'var(--accent)'],
+          ['Competitions', competitions.length, `${competitions.filter(c=>c.format==='BP').length} BP · ${competitions.filter(c=>c.format==='AP').length} AP`, 'var(--gold)'],
+          ['Total Rounds', totalRounds, `avg ${members.length?Math.round(totalRounds/members.length):0} per member`, 'var(--green)'],
+          ['Total Breaks', totalBreaks, `${members.length?Math.round(totalBreaks/members.length*10)/10:0} avg per member`, 'var(--accent2)'],
+          ['Study Materials', materials.length, `${materials.filter(m=>m.material_type==='file').length} files · ${materials.filter(m=>m.material_type==='link').length} links`, 'var(--purple)'],
+          ['Motions', motions.length, `${standaloneCount} practice · ${compTiedCount} tournament`, 'var(--red)'],
+        ].map(([l,v,sub,c])=>(
+          <div key={l} className="dash-card">
+            <div className="dash-card-stripe" style={{background:c}}/>
+            <div className="dash-num" style={{color:c}}>{v}</div>
+            <div className="dash-lbl">{l}</div>
+            <div className="dash-sub">{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* SVG Charts Grid */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:12,marginBottom:12}}>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Competition Formats</div>
+          <DonutChart bp={competitions.filter(c=>c.format==='BP').length} ap={competitions.filter(c=>c.format==='AP').length} />
+        </div>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Competitions by Level</div>
+          <LevelColumnChart byLevel={byLevel} maxVal={Math.max(...Object.values(byLevel), 1)} />
+        </div>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:12,marginBottom:12}}>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Members by Division</div>
+          {Object.entries(byDiv).map(([d,v])=>(
+            <div key={d} className="progress-row">
+              <div className="progress-lbl"><DivBadge div={d}/></div>
+              <div className="progress-bar"><div className="progress-fill" style={{width:`${v/maxDiv*100}%`,background:'var(--accent)'}}/></div>
+              <div className="progress-val">{v}</div>
+            </div>
+          ))}
+        </div>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Members by Rank</div>
+          {Object.entries(byRank).map(([r,v])=>(
+            <div key={r} className="progress-row">
+              <div className="progress-lbl"><RankBadge rank={r}/></div>
+              <div className="progress-bar"><div className="progress-fill" style={{width:`${v/maxRank*100}%`,background:r==='Ace'?'var(--gold)':r==='Troop'?'var(--blue)':'var(--text3)'}}/></div>
+              <div className="progress-val">{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Motions Analytics Grid */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:12,marginBottom:12}}>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Motion Formats & Scope Ratio</div>
+          <div style={{display:'flex',flexDirection:'column',gap:16}}>
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:'.76rem',fontWeight:600,marginBottom:6}}>
+                <span style={{color:'var(--text2)'}}>Formats Breakdown</span>
+                <span style={{color:'var(--text3)'}}>{bpMotionsCount} BP · {apMotionsCount} AP</span>
+              </div>
+              <div style={{height:8,background:'var(--surface2)',borderRadius:4,overflow:'hidden',display:'flex'}}>
+                <div style={{width:`${bpMotionsCount/totalFormat*100}%`,background:'var(--blue)',height:'100%'}} title={`BP: ${bpMotionsCount}`} />
+                <div style={{width:`${apMotionsCount/totalFormat*100}%`,background:'var(--purple)',height:'100%'}} title={`AP: ${apMotionsCount}`} />
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',marginTop:4,fontSize:'.64rem',color:'var(--text3)'}}>
+                <span>BP Format ({Math.round(bpMotionsCount/totalFormat*100)}%)</span>
+                <span>AP Format ({Math.round(apMotionsCount/totalFormat*100)}%)</span>
+              </div>
+            </div>
+
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:'.76rem',fontWeight:600,marginBottom:6}}>
+                <span style={{color:'var(--text2)'}}>Practice vs. Tournament</span>
+                <span style={{color:'var(--text3)'}}>{standaloneCount} Practice · {compTiedCount} Tournament</span>
+              </div>
+              <div style={{height:8,background:'var(--surface2)',borderRadius:4,overflow:'hidden',display:'flex'}}>
+                <div style={{width:`${standaloneCount/totalScope*100}%`,background:'var(--gold)',height:'100%'}} title={`Practice: ${standaloneCount}`} />
+                <div style={{width:`${compTiedCount/totalScope*100}%`,background:'var(--accent)',height:'100%'}} title={`Tournament: ${compTiedCount}`} />
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',marginTop:4,fontSize:'.64rem',color:'var(--text3)'}}>
+                <span>Standalone Practice ({Math.round(standaloneCount/totalScope*100)}%)</span>
+                <span>Tournament tied ({Math.round(compTiedCount/totalScope*100)}%)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Top Debate Topics (Tags)</div>
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {sortedTags.length === 0 ? (
+              <div style={{textAlign:'center',color:'var(--text3)',fontSize:'.78rem',padding:'20px 0'}}>No tags found in motions.</div>
+            ) : (
+              sortedTags.map(([tag, count]) => (
+                <div key={tag} className="progress-row" style={{alignItems:'center'}}>
+                  <div className="progress-lbl" style={{width:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontSize:'.74rem',fontWeight:600}} title={tag}>
+                    {tag}
+                  </div>
+                  <div className="progress-bar" style={{flex:1}}>
+                    <div className="progress-fill" style={{width:`${count/maxTagCount*100}%`,background:'var(--accent)'}}/>
+                  </div>
+                  <div className="progress-val" style={{width:40,textAlign:'right',fontSize:'.74rem',fontWeight:700,color:'var(--accent)'}}>
+                    {count}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:12,marginBottom:12}}>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:12,fontSize:'.88rem'}}>🏅 Top 10 — Rounds</div>
+          <table>
+            <thead><tr><th>#</th><th>Name</th><th>Div</th><th style={{textAlign:'center'}}>Rounds</th></tr></thead>
+            <tbody>
+              {topRounds.map((m,i)=>(
+                <tr key={m.id}>
+                  <td style={{fontWeight:700,color:i===0?'var(--gold)':i<3?'var(--text2)':'var(--text3)',fontSize:'.72rem'}}>{i+1}</td>
+                  <td style={{fontSize:'.82rem',fontWeight:i===0?700:400}}>{m.full_name}</td>
+                  <td><DivBadge div={m.division}/></td>
+                  <td style={{fontWeight:700,color:'var(--accent)',textAlign:'center'}}>{m.total_rounds||0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:12,fontSize:'.88rem'}}>🏅 Top 10 — Breaks</div>
+          <table>
+            <thead><tr><th>#</th><th>Name</th><th>Div</th><th style={{textAlign:'center'}}>Breaks</th></tr></thead>
+            <tbody>
+              {topBreaks.map((m,i)=>(
+                <tr key={m.id}>
+                  <td style={{fontWeight:700,color:i===0?'var(--gold)':i<3?'var(--text2)':'var(--text3)',fontSize:'.72rem'}}>{i+1}</td>
+                  <td style={{fontSize:'.82rem',fontWeight:i===0?700:400}}>{m.full_name}</td>
+                  <td><DivBadge div={m.division}/></td>
+                  <td style={{fontWeight:700,color:'var(--gold)',textAlign:'center'}}>{m.total_breaking||0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {Object.keys(byLevel).length > 0 && (
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:12,fontSize:'.88rem'}}>Competitions by Level</div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            {Object.entries(byLevel).sort((a,b)=>b[1]-a[1]).map(([l,v])=>(
+              <div key={l} style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',textAlign:'center',minWidth:80}}>
+                <div style={{fontSize:'1.4rem',fontWeight:800,color:'var(--accent)',lineHeight:1}}>{v}</div>
+                <div style={{fontSize:'.63rem',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:3}}>{l}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── USER PREFS PANEL ────────────────────────────────────────────────────────
+function UserPrefsPanel({ prefs, setPref, onClose }) {
+  const ACCENT_COLORS = [
+    {id:'blue',val:'#5b82f6'},{id:'purple',val:'#a855f7'},{id:'green',val:'#10b981'},
+    {id:'gold',val:'#e6b84a'},{id:'red',val:'#f87171'},{id:'orange',val:'#fb923c'},
+    {id:'teal',val:'#22d3ee'},{id:'magenta',val:'#f472b6'},
+  ];
+
+  const handleAccent = id => {
+    applyAccent(id);
+    setPref('accent_color', id);
+  };
+
+  const handleTheme = t => {
+    if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+    setPref('theme', t);
+  };
+
+  const handleCompact = v => {
+    document.body.setAttribute('data-compact', v ? 'true' : 'false');
+    setPref('compact_tables', v);
+  };
+
+  return (
+    <div className="uprefs-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="uprefs-panel">
+        <div className="uprefs-title">
+          <span>Preferences</span>
+          <button className="uprefs-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="uprefs-row">
+          <div className="uprefs-label">
+            Theme
+            <div className="uprefs-sub">Light or dark mode</div>
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button className={`btn btn-xs ${prefs.theme === 'dark' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => handleTheme('dark')}>🌙</button>
+            <button className={`btn btn-xs ${prefs.theme === 'light' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => handleTheme('light')}>☀️</button>
+          </div>
+        </div>
+        <div className="uprefs-row">
+          <div className="uprefs-label">
+            Accent Color
+            <div className="uprefs-sub">Highlight colors</div>
+          </div>
+          <div className="color-chips">
+            {ACCENT_COLORS.map(c => (
+              <div key={c.id} title={c.id} className={`color-chip ${prefs.accent_color === c.id ? 'on' : ''}`} style={{ background: c.val, width: 20, height: 20 }} onClick={() => handleAccent(c.id)} />
+            ))}
+          </div>
+        </div>
+        <div className="uprefs-row">
+          <div className="uprefs-label">
+            Compact Tables
+            <div className="uprefs-sub">Tighter grids density</div>
+          </div>
+          <Toggle checked={prefs.compact_tables} onChange={handleCompact} />
+        </div>
+        <div className="uprefs-row">
+          <div className="uprefs-label">
+            Show Rank Icons
+            <div className="uprefs-sub">Display rank markers</div>
+          </div>
+          <Toggle checked={prefs.show_rank_icons !== false} onChange={v => setPref('show_rank_icons', v)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── BOARDS TAB ──────────────────────────────────────────────────────────────
+function OrgNode({ b, m, tier, style, photoUrl }) {
+  const finalPhoto = photoUrl || b?.photo_url;
+  return (
+    <div className={`org-node n${tier}`} style={style}>
+      <div className="org-ava">
+        {finalPhoto ? <img src={finalPhoto} alt={b?.member_name || m?.full_name} /> : '👤'}
+      </div>
+      <div className="org-pos">{b?.position || (m?.classes?.includes('Advisor') ? 'Advisor' : '—')}</div>
+      <div className="org-nm">{b?.member_name || m?.full_name || <span style={{color:'var(--text3)',fontStyle:'italic',fontSize:'.72rem'}}>Vacant</span>}</div>
+      {m && <div className="org-badges"><DivBadge div={m.division}/><RankBadge rank={m.rank}/></div>}
+      <div className="org-tip">
+        {m ? <>
+          <div className="org-tip-row"><span className="org-tip-k">Division</span><span className="org-tip-v">{m.division}</span></div>
+          <div className="org-tip-row"><span className="org-tip-k">Rank</span><span className="org-tip-v">{m.rank}</span></div>
+          <div className="org-tip-row"><span className="org-tip-k">Comps</span><span className="org-tip-v" style={{color:'var(--accent)'}}>{m.total_competitions||0}</span></div>
+          <div className="org-tip-row"><span className="org-tip-k">Breaks</span><span className="org-tip-v" style={{color:'var(--gold)'}}>{m.total_breaking||0}</span></div>
+          {m.top_round && <div className="org-tip-row"><span className="org-tip-k">Top Round</span><span className="org-tip-v" style={{color:'var(--green)'}}>{m.top_round}</span></div>}
+        </> : <div style={{color:'var(--text3)',fontSize:'.72rem'}}>{b?.extra_info || 'No member assigned'}</div>}
+      </div>
+    </div>
+  );
+}
+
+function BoardsTab({ boards, members }) {
+  const gm = name => members.find(m=>m.full_name?.toLowerCase()===name?.toLowerCase());
+  const gb = pos => boards.find(b=>b.position===pos)||null;
+
+  const advisorEntries = boards.filter(b => b.position === 'Advisor').filter(b => {
+    const isExec = boards.some(other => 
+      other.member_name?.toLowerCase() === b.member_name?.toLowerCase() && 
+      other.position !== 'Advisor'
+    );
+    return !isExec;
+  });
+  const advisors = advisorEntries.map(b => {
+    const m = members.find(m => m.full_name?.toLowerCase() === b.member_name?.toLowerCase());
+    return { boardEntry: b, member: m };
+  }).sort((a, b) => (a.member?.full_name || a.boardEntry.member_name)?.localeCompare(b.member?.full_name || b.boardEntry.member_name));
+
+  if (boards.length === 0) return (
+    <div className="pub-content">
+      <div className="pg-head"><h2>Board of Executives</h2><p>Organizational structure of EDS UNIMA</p></div>
+      <div className="hof-empty"><div className="hof-empty-ico">📋</div><p>No board members configured yet.</p></div>
+    </div>
+  );
+
+  const N2=164, G2=48, G3=32;
+
+  const depts = [
+    {label:'Training', dir:'Training Director', off:'Training Officer'},
+    {label:'People',   dir:'People Director',   off:'People Officer'},
+    {label:'MedCom',   dir:'MedCom Director',   off:'MedCom Officer'},
+  ];
+
+  return (
+    <div className="pub-content" style={{overflowX:'auto',WebkitOverflowScrolling:'touch'}}>
+      <div className="pg-head">
+        <h2>Board of Executives</h2>
+        <p>Organizational structure of EDS UNIMA · hover a card for stats</p>
+      </div>
+
+      <div style={{minWidth:1240,display:'flex',gap:40,justifyContent:'center',alignItems:'flex-start',paddingBottom:36}}>
+        
+        {/* Left Column: Executive Tree */}
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',flex:1}}>
+          {/* ── President ── */}
+          <OrgNode b={gb('President')} m={gm(gb('President')?.member_name)} tier={1} />
+          
+          {/* Vertical line President → VP */}
+          <div style={{width:2,height:12,background:'var(--org-line)'}} />
+
+          {/* ── Vice President ── */}
+          <OrgNode b={gb('Vice President')} m={gm(gb('Vice President')?.member_name)} tier={1} />
+
+          {/* Vertical line VP → Sec/Treas */}
+          <div style={{width:2,height:12,background:'var(--org-line)'}} />
+
+          {/* ── Secretary & Treasurer Row ── */}
+          <div style={{display:'flex',gap:G2,justifyContent:'center',position:'relative'}}>
+            {['Secretary','Treasurer'].map((pos, idx)=>(
+              <div key={pos} style={{width:N2,flexShrink:0,position:'relative',paddingTop:12,display:'flex',flexDirection:'column'}}>
+                {/* Horizontal line segment */}
+                <div style={{
+                  position:'absolute',
+                  top:0,
+                  left: idx===0?'50%':`-${G2/2}px`,
+                  right: idx===1?'50%':`-${G2/2}px`,
+                  height:2,
+                  background:'var(--org-line)'
+                }} />
+                {/* Vertical drop line to card */}
+                <div style={{
+                  position:'absolute',
+                  top:0,
+                  left:'50%',
+                  transform:'translateX(-50%)',
+                  width:2,
+                  height:12,
+                  background:'var(--org-line)'
+                }} />
+                <OrgNode b={gb(pos)} m={gm(gb(pos)?.member_name)} tier={2} style={{height:'100%'}} />
+              </div>
+            ))}
+          </div>
+
+          {/* ── Funnel Connector below Sec/Treas ── */}
+          <div style={{display:'flex',gap:G2,justifyContent:'center',width:'100%',position:'relative',height:20}}>
+            {/* Spacer for Secretary */}
+            <div style={{width:N2,position:'relative',height:10,flexShrink:0}}>
+              {/* Vertical drop from Secretary card */}
+              <div style={{position:'absolute',top:0,left:'50%',transform:'translateX(-50%)',width:2,height:10,background:'var(--org-line)'}} />
+              {/* Horizontal line segment */}
+              <div style={{position:'absolute',bottom:0,left:'50%',right:`-${G2/2}px`,height:2,background:'var(--org-line)'}} />
+            </div>
+            {/* Spacer for Treasurer */}
+            <div style={{width:N2,position:'relative',height:10,flexShrink:0}}>
+              {/* Vertical drop from Treasurer card */}
+              <div style={{position:'absolute',top:0,left:'50%',transform:'translateX(-50%)',width:2,height:10,background:'var(--org-line)'}} />
+              {/* Horizontal line segment */}
+              <div style={{position:'absolute',bottom:0,left:`-${G2/2}px`,right:'50%',height:2,background:'var(--org-line)'}} />
+            </div>
+            {/* Center drop line */}
+            <div style={{
+              position:'absolute',
+              top:10,
+              bottom:0,
+              left:'50%',
+              transform:'translateX(-50%)',
+              width:2,
+              background:'var(--org-line)'
+            }} />
+          </div>
+
+          {/* ── 3 Department Columns ── */}
+          <div style={{display:'flex',gap:G3,alignItems:'flex-start',flexShrink:0}}>
+            {depts.map((dept, idx)=>{
+              const deptOfficers = boards.filter(b => b.position === dept.off);
+              return (
+                <div key={dept.label} style={{display:'flex',flexDirection:'column',alignItems:'center',flexShrink:0,position:'relative',paddingTop:12}}>
+                  
+                  {/* Horizontal line segment connecting the departments */}
+                  <div style={{
+                    position:'absolute',
+                    top:0,
+                    left: idx===0?'50%':`-${G3/2}px`,
+                    right: idx===depts.length-1?'50%':`-${G3/2}px`,
+                    height:2,
+                    background:'var(--org-line)'
+                  }} />
+                  {/* Vertical drop from horizontal line */}
+                  <div style={{
+                    position:'absolute',
+                    top:0,
+                    left:'50%',
+                    transform:'translateX(-50%)',
+                    width:2,
+                    height:36,
+                    background:'var(--org-line)'
+                  }} />
+
+                  {/* dept label */}
+                  <div style={{fontSize:'.59rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--text3)',padding:'2px 8px',background:'var(--surface2)',borderRadius:20,border:'1px solid var(--border)',marginBottom:8,whiteSpace:'nowrap',zIndex:2}}>
+                    {dept.label}
+                  </div>
+
+                  {/* Director */}
+                  <OrgNode b={gb(dept.dir)} m={gm(gb(dept.dir)?.member_name)} tier={3} />
+
+                  {/* Officers */}
+                  {deptOfficers.length > 0 && (
+                    <>
+                      {deptOfficers.length > 1 ? (
+                        <div style={{display:'flex',flexDirection:'column',alignItems:'center',width:'100%'}}>
+                          {/* Vertical line from Director bottom to horizontal bridge */}
+                          <div style={{width:2,height:12,background:'var(--org-line)'}} />
+                          
+                          <div style={{display:'flex',gap:12,justifyContent:'center',width:'100%'}}>
+                            {deptOfficers.map((off, oIdx)=>(
+                              <div key={off.id || oIdx} style={{position:'relative',paddingTop:12,display:'flex',flexDirection:'column'}}>
+                                {/* Horizontal bridge segment */}
+                                <div style={{
+                                  position:'absolute',
+                                  top:0,
+                                  left: oIdx===0?'50%':'-6px',
+                                  right: oIdx===1?'50%':'-6px',
+                                  height:2,
+                                  background:'var(--org-line)'
+                                }} />
+                                {/* Vertical drop to officer card */}
+                                <div style={{
+                                  position:'absolute',
+                                  top:0,
+                                  left:'50%',
+                                  transform:'translateX(-50%)',
+                                  width:2,
+                                  height:12,
+                                  background:'var(--org-line)'
+                                }} />
+                                <OrgNode b={off} m={gm(off.member_name)} tier={3} style={{height:'100%'}} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Single officer */
+                        <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
+                          <div style={{width:2,height:12,background:'var(--org-line)'}} />
+                          <OrgNode b={deptOfficers[0]} m={gm(deptOfficers[0].member_name)} tier={3} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Right Column: Board of Advisors Panel */}
+        {advisors.length > 0 && (
+          <div style={{
+            width: 350,
+            flexShrink: 0,
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--r2)',
+            padding: '16px 20px',
+            marginTop: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16
+          }}>
+            <div style={{borderBottom:'1px solid var(--border)',paddingBottom:8,className:'no-select'}}>
+              <h3 style={{fontFamily:'Playfair Display,serif',fontSize:'1.15rem',fontWeight:700,color:'var(--text)',marginBottom:2}}>Senior Advisors</h3>
+              <p style={{color:'var(--text3)',fontSize:'.72rem'}}>Senior mentors providing strategic guidance</p>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(2, 150px)',gap:12,justifyContent:'center'}}>
+              {advisors.map(({ boardEntry, member }) => {
+                const photoUrl = boardEntry?.photo_url || boards.find(other => other.member_name?.toLowerCase() === boardEntry?.member_name?.toLowerCase() && other.photo_url)?.photo_url;
+                return (
+                  <OrgNode key={boardEntry.id} b={boardEntry} m={member} tier={3} style={{width:'100%'}} photoUrl={photoUrl} />
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      {/* Legend */}
+      <div style={{display:'flex',flexWrap:'wrap',gap:12,justifyContent:'center',padding:'14px 0',borderTop:'1px solid var(--border)'}}>
+        {[
+          {c:'var(--gold-border)',  bg:'rgba(230,184,74,.08)',  lbl:'Top Leadership (Pres / VP)'},
+          {c:'rgba(108,143,255,.3)',bg:'rgba(108,143,255,.07)', lbl:'Senior (Sec / Treas)'},
+          {c:'var(--border2)',      bg:'var(--surface)',         lbl:'Departments (Dir / Off)'},
+        ].map(l=>(
+          <div key={l.lbl} style={{display:'flex',alignItems:'center',gap:6,fontSize:'.71rem',color:'var(--text3)'}}>
+            <div style={{width:13,height:13,borderRadius:3,background:l.bg,border:`1.5px solid ${l.c}`,flexShrink:0}}/>
+            {l.lbl}
+          </div>
+        ))}
+        <div style={{fontSize:'.71rem',color:'var(--text3)',fontStyle:'italic'}}>Hover a card to see stats</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── HALL OF FAME TAB ─────────────────────────────────────────────────────────
+function HallOfFameTab({ hof }) {
+  return (
+    <div className="hof-wrap">
+      <div className="hof-header">
+        <div className="hof-deco">✦ · Hall of Fame · ✦</div>
+        <h1 className="hof-title">EDS UNIMA Hall of Fame</h1>
+        <p className="hof-sub">Honoring those who have made exceptional contributions to our organization</p>
+      </div>
+      {hof.length === 0
+        ? <div className="hof-empty"><div className="hof-empty-ico">🏛️</div><p>Hall of Fame entries coming soon.</p></div>
+        : (
+          <div className="hof-grid">
+            {hof.map(h=>(
+              <div key={h.id} className="hof-card">
+                <div className="hof-card-top">
+                  <div className="hof-avatar">
+                    {h.photo_url ? <img src={h.photo_url} alt={h.name}/> : '🏆'}
+                  </div>
+                  <div className="hof-award">✦ {h.award_title}</div>
+                  <div className="hof-name">{h.name}</div>
+                  {h.year && <div style={{fontSize:'.7rem',color:'var(--gold)',marginTop:4,fontWeight:600}}>{h.year}</div>}
+                </div>
+                <div className="hof-card-body">
+                  <p className="hof-desc">{h.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      }
+    </div>
+  );
+}
+
+const MATERIAL_CATEGORIES = ['BP Format','AP Format','Adjudication','Motions','Strategy','Theory','General','Other'];
+
+function StudyMaterialsTab({ materials, loading }) {
+  const [filter, setFilter] = React.useState('all');
+  const [search, setSearch] = React.useState('');
+  const [highlightedId, setHighlightedId] = React.useState(null);
+  const [toast, toastEl] = useToast();
+
+  const categories = React.useMemo(() => {
+    const allCats = materials.flatMap(m => {
+      const cats = m.categories || (m.category ? [m.category] : []);
+      return cats.length > 0 ? cats : ['General'];
+    });
+    return ['all', ...new Set(allCats)];
+  }, [materials]);
+
+  const filtered = React.useMemo(() => {
+    return materials.filter(m => {
+      const cats = m.categories || (m.category ? [m.category] : []);
+      const materialCats = cats.length > 0 ? cats : ['General'];
+      const catMatches = filter === 'all' || materialCats.includes(filter);
+
+      const q = search.toLowerCase();
+      const textMatches = !q ||
+        m.title?.toLowerCase().includes(q) ||
+        m.description?.toLowerCase().includes(q) ||
+        materialCats.some(c => c.toLowerCase().includes(q));
+
+      return catMatches && textMatches;
+    });
+  }, [materials, filter, search]);
+
+  const highlighted = React.useMemo(() => filtered.filter(m => m.is_highlighted), [filtered]);
+  const regular = React.useMemo(() => filtered.filter(m => !m.is_highlighted), [filtered]);
+
+  const fmtDate = d => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return dt.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+  };
+
+  const openMaterial = m => {
+    if (m.material_type === 'file' && m.url) {
+      const a = document.createElement('a');
+      a.href = m.url;
+      a.download = m.file_name || m.title || 'material';
+      a.click();
+    } else if (m.url) {
+      window.open(m.url, '_blank', 'noopener');
+    }
+  };
+
+  const shareMaterial = (e, m) => {
+    e.stopPropagation();
+    const url = window.location.origin + window.location.pathname + '?tab=materials&id=' + m.id;
+    navigator.clipboard.writeText(url)
+      .then(() => {
+        toast('Link copied to clipboard!');
+      })
+      .catch(() => {
+        const textarea = document.createElement('textarea');
+        textarea.value = url;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          toast('Link copied to clipboard!');
+        } catch (err) {
+          toast('Failed to copy link', 'error');
+        }
+        document.body.removeChild(textarea);
+      });
+  };
+
+  React.useEffect(() => {
+    if (loading || !materials.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const targetId = params.get('id');
+    if (targetId) {
+      const idNum = parseInt(targetId, 10);
+      setHighlightedId(idNum);
+      setTimeout(() => {
+        const el = document.getElementById(`material-card-${idNum}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 500);
+    }
+  }, [loading, materials]);
+
+  return (
+    <div className="pub-content">
+      <div className="pg-head">
+        <h2>Study Materials</h2>
+        <p>Debate learning resources, references, and training files</p>
+      </div>
+
+      {/* Filters */}
+      <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:16,alignItems:'center'}}>
+        <input
+          value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search materials…"
+          style={{padding:'7px 12px',borderRadius:'var(--r)',border:'1px solid var(--border2)',background:'var(--surface2)',color:'var(--text)',fontSize:'.82rem',outline:'none',minWidth:200}}
+        />
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {categories.map(c => (
+            <button key={c} onClick={() => setFilter(c)}
+              style={{
+                padding:'5px 12px', borderRadius:20, fontSize:'.72rem', fontWeight:600,
+                border: `1px solid ${filter===c ? 'var(--accent)' : 'var(--border2)'}`,
+                background: filter===c ? 'var(--accent)' : 'var(--surface2)',
+                color: filter===c ? '#fff' : 'var(--text3)', cursor:'pointer', transition:'all .15s'
+              }}
+            >{c === 'all' ? 'All Categories' : c}</button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{textAlign:'center',padding:'48px 0',color:'var(--text3)'}}>
+          <div className="spin" style={{margin:'0 auto 12px'}}/>
+          <p>Loading materials…</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="hof-empty">
+          <div className="hof-empty-ico">📚</div>
+          <p>{materials.length === 0 ? 'No study materials uploaded yet.' : 'No materials match your search.'}</p>
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:20}}>
+          {/* Highlighted / Featured Section */}
+          {highlighted.length > 0 && (
+            <div>
+              <div style={{
+                fontSize: '.75rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '.08em',
+                color: 'var(--gold)',
+                marginBottom: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}>
+                <span>⭐ Featured Resources</span>
+                <div style={{flex:1, height:1, background:'linear-gradient(90deg, rgba(223,170,50,.35) 0%, transparent 100%)'}} />
+              </div>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                gap: 8
+              }}>
+                {highlighted.map(m => {
+                  const cats = m.categories || (m.category ? [m.category] : []);
+                  const materialCats = cats.length > 0 ? cats : ['General'];
+                  return (
+                    <div 
+                      key={m.id} 
+                      id={`material-card-${m.id}`}
+                      className={highlightedId === m.id ? 'pulse-highlight' : ''}
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(230, 184, 74, 0.06) 0%, var(--surface) 100%)',
+                        border: '2px solid rgba(230, 184, 74, 0.45)',
+                        borderRadius: 'var(--r2)',
+                        padding: '10px 12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        transition: 'all .22s cubic-bezier(0.4, 0, 0.2, 1)',
+                        cursor: m.url ? 'pointer' : 'default',
+                        position: 'relative',
+                        boxShadow: '0 2px 10px rgba(230, 184, 74, 0.06)'
+                      }}
+                      onClick={() => m.url && openMaterial(m)}
+                      onMouseEnter={e => {
+                        if (m.url) {
+                          e.currentTarget.style.borderColor = 'rgba(230, 184, 74, 0.9)';
+                          e.currentTarget.style.boxShadow = '0 4px 15px rgba(230, 184, 74, 0.15)';
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.borderColor = 'rgba(230, 184, 74, 0.45)';
+                        e.currentTarget.style.boxShadow = '0 2px 10px rgba(230, 184, 74, 0.06)';
+                        e.currentTarget.style.transform = 'none';
+                      }}
+                    >
+                      <div>
+                        <div style={{display:'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6}}>
+                          {/* Icon */}
+                          <div style={{
+                            width:26, height:26, borderRadius:'var(--r)', flexShrink:0, display:'flex',
+                            alignItems:'center', justifyContent:'center', fontSize:'.85rem',
+                            background: 'rgba(230, 184, 74, 0.12)',
+                            border: '1px solid rgba(230, 184, 74, 0.25)'
+                          }}>
+                            ⭐
+                          </div>
+                          <span style={{
+                            fontSize:'.52rem', fontWeight:800, padding:'1px 4.5px', borderRadius:4,
+                            background:'rgba(230, 184, 74, 0.15)', color:'var(--gold)',
+                            border:'1px solid rgba(230, 184, 74, 0.3)', letterSpacing:'.03em'
+                          }}>
+                            FEATURED
+                          </span>
+                        </div>
+
+                        {/* Info */}
+                        <div style={{fontWeight:700, fontSize:'.8rem', color:'var(--text)', marginBottom:3}}>
+                          {m.title}
+                        </div>
+                        {m.description && (
+                          <div style={{
+                            fontSize:'.68rem', 
+                            color:'var(--text2)', 
+                            marginBottom:6, 
+                            display:'-webkit-box', 
+                            WebkitLineClamp:2, 
+                            WebkitBoxOrient:'vertical', 
+                            overflow:'hidden', 
+                            textOverflow:'ellipsis',
+                            lineHeight:'1.35'
+                          }}>
+                            {m.description}
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        {/* Category Tags */}
+                        <div style={{display:'flex', gap:3, alignItems:'center', flexWrap:'wrap', marginBottom:8}}>
+                          {materialCats.map(cat => (
+                            <span key={cat} style={{
+                              fontSize:'.54rem', fontWeight:700, padding:'1px 5px', borderRadius:10,
+                              background:'rgba(230, 184, 74, 0.08)', color:'var(--gold)',
+                              border:'1px solid rgba(230, 184, 74, 0.15)', textTransform:'uppercase', letterSpacing:'.04em'
+                            }}>{cat}</span>
+                          ))}
+                        </div>
+
+                        {/* Bottom Section with Action and Date */}
+                        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', borderTop:'1px solid var(--border)', paddingTop:6}}>
+                          <div style={{display:'flex', flexDirection:'column', gap:1, minWidth:0}}>
+                            <span style={{fontSize:'.58rem', color:'var(--text3)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:90}} title={m.material_type === 'file' ? m.file_name : m.url}>
+                              {m.material_type === 'file' ? (m.file_name || 'File') : 'External Link'}
+                            </span>
+                            <span style={{fontSize:'.56rem', color:'var(--text3)'}}>{fmtDate(m.uploaded_at)}</span>
+                          </div>
+                          <div style={{display:'flex', gap:6, alignItems:'center'}}>
+                            <button 
+                              onClick={(e) => shareMaterial(e, m)}
+                              className="btn btn-ghost"
+                              style={{
+                                padding:'3px 8px', borderRadius:'var(--r)', fontSize:'.65rem', fontWeight:600,
+                                color: 'var(--gold)', border: '1px solid rgba(230, 184, 74, 0.3)',
+                                background: 'transparent', cursor: 'pointer', transition: 'all .15s',
+                                display: 'flex', alignItems: 'center', gap: 3
+                              }}
+                              title="Copy link to this resource"
+                            >
+                              🔗 Share
+                            </button>
+                            {m.url && (
+                              <div 
+                                className="btn-gold"
+                                style={{
+                                  flexShrink:0, padding:'3px 8px', borderRadius:'var(--r)', fontSize:'.65rem', fontWeight:600,
+                                  display:'flex', alignItems:'center', gap:3,
+                                  boxShadow: '0 2px 6px rgba(223,170,50,.15)'
+                                }}
+                              >
+                                {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Regular Materials Section */}
+          {regular.length > 0 && (
+            <div>
+              {highlighted.length > 0 && (
+                <div style={{
+                  fontSize: '.75rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '.08em',
+                  color: 'var(--text3)',
+                  marginBottom: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}>
+                  <span>All Materials</span>
+                  <div style={{flex:1, height:1, background:'linear-gradient(90deg, var(--border2) 0%, transparent 100%)'}} />
+                </div>
+              )}
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {regular.map(m => {
+                  const cats = m.categories || (m.category ? [m.category] : []);
+                  const materialCats = cats.length > 0 ? cats : ['General'];
+                  
+                  return (
+                    <div 
+                      key={m.id} 
+                      id={`material-card-${m.id}`}
+                      className={highlightedId === m.id ? 'pulse-highlight' : ''}
+                      style={{
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--r2)',
+                        padding: '14px 18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 16,
+                        transition: 'all .15s ease',
+                        cursor: m.url ? 'pointer' : 'default',
+                        position: 'relative'
+                      }}
+                      onClick={() => m.url && openMaterial(m)}
+                      onMouseEnter={e => {
+                        if (m.url) {
+                          e.currentTarget.style.borderColor = 'var(--accent)';
+                          e.currentTarget.style.boxShadow = '0 0 0 1px var(--accent)';
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.borderColor = 'var(--border)';
+                        e.currentTarget.style.boxShadow = 'none';
+                        e.currentTarget.style.transform = 'none';
+                      }}
+                    >
+                      {/* Icon */}
+                      <div style={{
+                        width:44, height:44, borderRadius:'var(--r)', flexShrink:0, display:'flex',
+                        alignItems:'center', justifyContent:'center', fontSize:'1.3rem',
+                        background: m.material_type === 'file' ? 'rgba(168,85,247,.12)' : 'rgba(108,143,255,.12)',
+                        border: `1px solid ${m.material_type === 'file' ? 'rgba(168,85,247,.25)' : 'rgba(108,143,255,.25)'}`
+                      }}>
+                        {m.material_type === 'file' ? '📄' : '🔗'}
+                      </div>
+
+                      {/* Info */}
+                      <div style={{flex:1, minWidth:0}}>
+                        <div style={{fontWeight:700, fontSize:'.92rem', color:'var(--text)', marginBottom:3, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+                          {m.title}
+                        </div>
+                        {m.description && (
+                          <div style={{fontSize:'.78rem', color:'var(--text2)', marginBottom:5, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                            {m.description}
+                          </div>
+                        )}
+                        <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                          {materialCats.map(cat => (
+                            <span key={cat} style={{
+                              fontSize:'.65rem', fontWeight:700, padding:'2px 8px', borderRadius:10,
+                              background:'rgba(108,143,255,.12)', color:'var(--accent)',
+                              border:'1px solid rgba(108,143,255,.2)', textTransform:'uppercase', letterSpacing:'.06em'
+                            }}>{cat}</span>
+                          ))}
+                          <span style={{fontSize:'.68rem', color:'var(--text3)'}}>
+                            {m.material_type === 'file' ? (m.file_name || 'File') : 'External Link'}
+                          </span>
+                          <span style={{fontSize:'.68rem', color:'var(--text3)'}}>·</span>
+                          <span style={{fontSize:'.68rem', color:'var(--text3)'}}>{fmtDate(m.uploaded_at)}</span>
+                        </div>
+                      </div>
+
+                      {/* Action */}
+                      <div style={{display:'flex', gap:6, alignItems:'center', flexShrink:0}}>
+                        <button 
+                          onClick={(e) => shareMaterial(e, m)}
+                          className="btn btn-ghost"
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 'var(--r)',
+                            fontSize: '.72rem',
+                            color: 'var(--accent)',
+                            border: '1px solid rgba(108,143,255,0.3)',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            transition: 'all .15s',
+                            display: 'flex', alignItems: 'center', gap: 4
+                          }}
+                          title="Copy link to this resource"
+                        >
+                          🔗 Share
+                        </button>
+                        {m.url && (
+                          <div 
+                            style={{
+                              flexShrink:0, padding:'6px 14px', borderRadius:'var(--r)', fontSize:'.75rem', fontWeight:600,
+                              background: 'var(--accent)',
+                              color: '#fff',
+                              display:'flex', alignItems:'center', gap:5,
+                              whiteSpace:'nowrap'
+                            }}
+                          >
+                            {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {toastEl}
+    </div>
+  );
+}
+
+// ─── PUBLIC MOTIONS TAB ───────────────────────────────────────────────────────
+function MotionsTab({ competitions, settings, members, motions = [] }) {
+  const [search, setSearch] = useState('');
+  const [formatFilter, setFormatFilter] = useState('All');
+  const [levelFilter, setLevelFilter] = useState('All');
+  const [tagFilter, setTagFilter] = useState('All');
+  const [viewComp, setViewComp] = useState(null);
+
+  const allMotions = useMemo(() => {
+    return motions.map(m => {
+      const comp = m.competition_id ? competitions.find(c => c.id === m.competition_id) : null;
+      return {
+        id: m.id,
+        compId: m.competition_id,
+        compCode: comp ? comp.code : '',
+        compName: comp ? comp.competition : '',
+        round: m.round || 'Round',
+        motion: m.motion,
+        infoslide: m.infoslide || '',
+        format: comp ? (comp.format || 'BP') : (m.format || 'BP'),
+        level: comp ? (comp.level || 'None') : (m.level || 'None'),
+        date: comp ? (comp.comp_date || '') : (m.date || ''),
+        source: comp ? comp.code : 'Standalone',
+        isStandalone: !m.competition_id,
+        tags: m.tags ? m.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+      };
+    });
+  }, [motions, competitions]);
+
+  const allTags = useMemo(() => {
+    const tagsSet = new Set();
+    allMotions.forEach(m => {
+      m.tags.forEach(t => tagsSet.add(t));
+    });
+    return Array.from(tagsSet).sort();
+  }, [allMotions]);
+
+  const filtered = useMemo(() => {
+    return allMotions.filter(m => {
+      if (formatFilter !== 'All' && m.format !== formatFilter) return false;
+      if (levelFilter !== 'All' && m.level !== levelFilter) return false;
+      if (tagFilter !== 'All') {
+        if (tagFilter === 'Standalone' && !m.isStandalone) return false;
+        if (tagFilter !== 'Standalone' && !m.tags.includes(tagFilter)) return false;
+      }
+
+      const q = search.toLowerCase().trim();
+      if (!q) return true;
+
+      return (
+        m.motion.toLowerCase().includes(q) ||
+        m.round.toLowerCase().includes(q) ||
+        m.source.toLowerCase().includes(q) ||
+        (m.compName && m.compName.toLowerCase().includes(q)) ||
+        m.level.toLowerCase().includes(q) ||
+        m.format.toLowerCase().includes(q) ||
+        m.tags.some(t => t.toLowerCase().includes(q))
+      );
+    });
+  }, [allMotions, search, formatFilter, levelFilter, tagFilter]);
+
+  const handleSourceClick = (m) => {
+    if (m.isStandalone) return;
+    const comp = competitions.find(c => c.id === m.compId);
+    if (comp) setViewComp(comp);
+  };
+
+  return (
+    <div className="pub-content">
+      <div className="pg-head">
+        <h2>Motions Archive</h2>
+        <p>Browse through debates, practice rounds, and competition motions</p>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search motions, rounds, topics..."
+            style={{
+              padding: '8px 14px',
+              borderRadius: 'var(--r)',
+              border: '1px solid var(--border2)',
+              background: 'var(--surface2)',
+              color: 'var(--text)',
+              fontSize: '.82rem',
+              outline: 'none',
+              minWidth: 260,
+              flex: 1
+            }}
+          />
+          
+          <select 
+            value={formatFilter}
+            onChange={e => setFormatFilter(e.target.value)}
+            style={{
+              padding: '7px 12px',
+              borderRadius: 'var(--r)',
+              border: '1px solid var(--border2)',
+              background: 'var(--surface2)',
+              color: 'var(--text)',
+              fontSize: '.82rem',
+              outline: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="All">All Formats</option>
+            <option value="BP">BP Format</option>
+            <option value="AP">AP Format</option>
+          </select>
+
+          <select 
+            value={levelFilter}
+            onChange={e => setLevelFilter(e.target.value)}
+            style={{
+              padding: '7px 12px',
+              borderRadius: 'var(--r)',
+              border: '1px solid var(--border2)',
+              background: 'var(--surface2)',
+              color: 'var(--text)',
+              fontSize: '.82rem',
+              outline: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="All">All Levels</option>
+            <option value="International">International</option>
+            <option value="National">National</option>
+            <option value="Regional">Regional</option>
+            <option value="Provincial">Provincial</option>
+            <option value="University">University</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: '.72rem', color: 'var(--text3)', marginRight: 4, fontWeight: 600 }}>Topics:</span>
+          <button
+            onClick={() => setTagFilter('All')}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 20,
+              fontSize: '.7rem',
+              fontWeight: 600,
+              border: `1px solid ${tagFilter === 'All' ? 'var(--accent)' : 'var(--border2)'}`,
+              background: tagFilter === 'All' ? 'var(--accent)' : 'var(--surface2)',
+              color: tagFilter === 'All' ? '#fff' : 'var(--text3)',
+              cursor: 'pointer',
+              transition: 'all .15s'
+            }}
+          >
+            All Topics
+          </button>
+          <button
+            onClick={() => setTagFilter('Standalone')}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 20,
+              fontSize: '.7rem',
+              fontWeight: 600,
+              border: `1px solid ${tagFilter === 'Standalone' ? 'var(--gold)' : 'var(--border2)'}`,
+              background: tagFilter === 'Standalone' ? 'var(--gold)' : 'var(--surface2)',
+              color: tagFilter === 'Standalone' ? '#000' : 'var(--text3)',
+              cursor: 'pointer',
+              transition: 'all .15s'
+            }}
+          >
+            ⭐ Standalone
+          </button>
+          {allTags.map(tag => (
+            <button
+              key={tag}
+              onClick={() => setTagFilter(tag)}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 20,
+                fontSize: '.7rem',
+                fontWeight: 600,
+                border: `1px solid ${tagFilter === tag ? 'var(--accent)' : 'var(--border2)'}`,
+                background: tagFilter === tag ? 'var(--accent)' : 'var(--surface2)',
+                color: tagFilter === tag ? '#fff' : 'var(--text3)',
+                cursor: 'pointer',
+                transition: 'all .15s'
+              }}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="hof-empty">
+          <div className="hof-empty-ico">📜</div>
+          <p>No motions match your filters.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {filtered.map(m => (
+            <div
+              key={m.id}
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--r2)',
+                padding: '16px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                transition: 'all .15s ease'
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = 'var(--accent)';
+                e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--border)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: '.78rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                  {m.round}
+                </span>
+                
+                <div 
+                  onClick={() => handleSourceClick(m)}
+                  style={{
+                    fontSize: '.68rem',
+                    fontWeight: 700,
+                    color: m.isStandalone ? 'var(--gold)' : 'var(--text2)',
+                    background: m.isStandalone ? 'rgba(230, 184, 74, 0.08)' : 'var(--surface2)',
+                    border: `1px solid ${m.isStandalone ? 'rgba(230, 184, 74, 0.2)' : 'var(--border)'}`,
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    cursor: m.isStandalone ? 'default' : 'pointer',
+                    transition: 'all .15s'
+                  }}
+                  title={m.isStandalone ? '' : 'Click to view competition details'}
+                >
+                  {m.isStandalone ? '⭐ Standalone Practice' : `🏆 ${m.source}`}
+                </div>
+              </div>
+
+              <div style={{
+                fontStyle: 'italic',
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                color: 'var(--text)',
+                lineHeight: 1.45,
+                padding: '4px 0'
+              }}>
+                "{m.motion}"
+              </div>
+
+              {m.infoslide && (
+                <div style={{
+                  fontSize: '.78rem',
+                  color: 'var(--text3)',
+                  background: 'var(--surface2)',
+                  borderLeft: '3px solid var(--border2)',
+                  padding: '8px 12px',
+                  borderRadius: 4,
+                  whiteSpace: 'pre-line',
+                  marginTop: 4
+                }}>
+                  <div style={{ fontWeight: 700, fontSize: '.68rem', textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text2)', marginBottom: 4 }}>Info Slide</div>
+                  {m.infoslide}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 4 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {m.format !== 'None' && (
+                    <span className={`badge ${m.format === 'BP' ? 'b-blue' : 'b-purple'}`} style={{ fontSize: '.6rem', fontWeight: 700 }}>
+                      {m.format}
+                    </span>
+                  )}
+                  {m.level !== 'None' && (
+                    <span className="badge b-gray" style={{ fontSize: '.6rem', fontWeight: 700 }}>
+                      {m.level}
+                    </span>
+                  )}
+                  {m.tags.map(tag => (
+                    <span key={tag} style={{
+                      fontSize: '.58rem',
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                      background: 'rgba(108,143,255,0.08)',
+                      color: 'var(--accent)',
+                      border: '1px solid rgba(108,143,255,0.15)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '.04em'
+                    }}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                {m.date && (
+                  <span style={{ fontSize: '.68rem', color: 'var(--text3)' }}>
+                    {m.date}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {viewComp && <CompParticipantsModal comp={viewComp} members={members} onClose={() => setViewComp(null)} settings={settings} motions={motions} />}
+    </div>
+  );
+}
+
+// ─── INFO TAB ─────────────────────────────────────────────────────────────────
+const DEFAULT_INFO = {
+  org_about:'A prestigious student organization at Universitas Negeri Manado that focuses on the proliferation of parliamentary debate.\n\nFlagship Project: Unima Debate League\n\nUniversitas Negeri Manado, Tondano, Sulawesi Utara, Indonesia'
+};
+
+const MEMBERSHIP_ROLES_INFO = [
+  {title:'President',         desc:'The highest leadership position, responsible for overall direction and representing the organization externally.'},
+  {title:'Vice President',    desc:'Assists the President and leads in their absence. Coordinates between all divisions and teams.'},
+  {title:'Secretary',         desc:'Manages organizational documentation, meeting notes, correspondence, and administrative records.'},
+  {title:'Treasurer',         desc:'Oversees all financial matters, budgeting, and financial reporting for the organization.'},
+  {title:'Training Director', desc:'Leads the training program, designs debate curricula, and coordinates all training sessions and workshops.'},
+  {title:'Training Officer',  desc:'Assists the Training Director in executing training sessions and supporting members in debate development.'},
+  {title:'People Director',   desc:'Responsible for member welfare, recruitment, community building, and organizational culture.'},
+  {title:'People Officer',    desc:'Assists the People Director in member engagement, events, and fostering a positive community environment.'},
+  {title:'MedCom Director',   desc:'Leads media and communications — managing social media, publications, and the organization public image.'},
+  {title:'MedCom Officer',    desc:'Assists the MedCom Director in content creation, documentation, and digital communications.'},
+  {title:'Member',            desc:'The core of the organization. General members participate in trainings, competitions, and organizational activities.'},
+];
+
+const CLASSES_INFO = [
+  {cls:'Advisor', badge:'b-gold',   desc:'Senior members who have demonstrated exceptional skill and experience. They serve as mentors, guiding the development of newer members and providing strategic advice to the organization.'},
+  {cls:'Board',   badge:'b-blue',   desc:'The Board of Executives — members chosen to lead and run the organization. They hold executive positions such as President, Vice President, Directors, Officers, and other leadership roles.'},
+  {cls:'General', badge:'b-gray',   desc:'General members of EDS UNIMA who actively participate in training sessions, competitions, and organizational activities.'},
+  {cls:'Alumni',  badge:'b-purple', desc:'Former members who have graduated from Universitas Negeri Manado. They remain part of the EDS UNIMA community and their competition records are preserved.'},
+  {cls:'Ex',      badge:'b-ex',     desc:'Individuals who were previously members but are no longer considered active — either due to removal or prolonged inactivity. Their competition records are retained in the database.'},
+];
+
+function InfoTab({ info, settings }) {
+  const get = (key, fallback) => info?.[key] || fallback;
+
+  const rankTraineeDesc = get('rank_trainee', 'Trainee is the entry-level rank for new members who have been accepted through recruitment and/or have completed basic debate training.');
+  const rankTroopDesc   = get('rank_troop_desc', 'Troop is the intermediate rank for members who have demonstrated sustained commitment and competitive experience.');
+  const rankTroopReqs   = get('rank_troop_reqs', 'Completed basic and/or intermediate debate training.\nParticipated in at least 4–5 provincial, regional, or national competitions across 2–3 semesters.');
+  const rankAceDesc     = get('rank_ace_desc', 'Ace is the highest rank, awarded to members who have proven excellence across training, volume of competition, and competitive achievement.');
+  const rankAceReqs     = get('rank_ace_reqs', 'Completed training at basic, intermediate, and national tournament preparation levels.\nParticipated in at least 8–10 competitions across 3–4 semesters.\nAchieved breaking status at least 3–4 times in regional, national, or international competitions.');
+  const divEn   = get('div_en',   'Members who compete in English-language debate tournaments, following BP or AP formats conducted in English.');
+  const divId   = get('div_id',   'Members who compete in Indonesian-language debate tournaments (KDMI, LDBI, etc.) conducted in Bahasa Indonesia.');
+  const divFlex = get('div_flex', 'Members who are proficient and compete in both English and Indonesian debate — capable of competing in either division.');
+  const clsAdvisor = get('class_advisor', CLASSES_INFO[0].desc);
+  const clsBoard   = get('class_board',   CLASSES_INFO[1].desc);
+  const clsGeneral = get('class_general', CLASSES_INFO[2].desc);
+  const clsAlumni  = get('class_alumni',  CLASSES_INFO[3].desc);
+  const clsEx      = get('class_ex',      CLASSES_INFO[4].desc);
+  const about = get('org_about', DEFAULT_INFO.org_about);
+
+  const body = {fontSize:'.92rem', lineHeight:'1.75', color:'var(--text2)'};
+  const small = {fontSize:'.88rem', lineHeight:'1.7', color:'var(--text2)'};
+
+  return (
+    <div className="pub-content">
+      <div className="info-wrap">
+        <div className="info-sec">
+          <h3 className="info-sec-title">What is EDS UNIMA?</h3>
+          <div className="info-org">
+            <div className="info-org-logo" style={{width:68,height:68,flexShrink:0}}>
+              {settings.logo_url ? <img src={settings.logo_url} alt="Logo"/> : 'E'}
+            </div>
+            <div>
+              <div className="info-org-title" style={{fontSize:'1rem',marginBottom:6}}>English Debating Society UNIMA</div>
+              <div style={{...body, whiteSpace:'pre-line'}}>{about}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="info-sec">
+          <h3 className="info-sec-title">Membership Roles</h3>
+          <div className="info-role-grid">
+            {MEMBERSHIP_ROLES_INFO.map(r=>(
+              <div key={r.title} className="info-role-card">
+                <div className="info-role-title" style={{fontSize:'.9rem',marginBottom:5}}>{r.title}</div>
+                <div style={small}>{r.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="info-sec">
+          <h3 className="info-sec-title">Debate Ranks</h3>
+          <div className="info-rank-card trainee">
+            <div className="info-rank-name"><span className="r-trainee">Trainee</span></div>
+            <div style={{...body, marginTop:4}}>{rankTraineeDesc}</div>
+          </div>
+          <div className="info-rank-card troop">
+            <div className="info-rank-name"><span className="r-troop">◆ Troop</span></div>
+            <div style={{...body, marginTop:4, marginBottom:8}}>{rankTroopDesc}</div>
+            <ul className="info-rank-reqs">
+              {rankTroopReqs.split('\n').filter(l=>l.trim()).map((l,i)=>(
+                <li key={i} className="info-rank-req" style={{fontSize:'.88rem'}}>{l}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="info-rank-card ace">
+            <div className="info-rank-name"><span className="r-ace">✦ Ace</span></div>
+            <div style={{...body, marginTop:4, marginBottom:8}}>{rankAceDesc}</div>
+            <ul className="info-rank-reqs">
+              {rankAceReqs.split('\n').filter(l=>l.trim()).map((l,i)=>(
+                <li key={i} className="info-rank-req" style={{fontSize:'.88rem'}}>{l}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="info-sec">
+          <h3 className="info-sec-title">Debate Divisions</h3>
+          <div className="info-div-grid">
+            {[
+              {div:'English',  name:'English Division',   desc:divEn},
+              {div:'Indonesia',name:'Indonesia Division',  desc:divId},
+              {div:'Flex',     name:'Flex Division',       desc:divFlex},
+            ].map(d=>(
+              <div key={d.div} className="info-div-card">
+                <div className="info-div-badge"><DivBadge div={d.div}/></div>
+                <div className="info-div-name" style={{fontSize:'.92rem',marginBottom:5}}>{d.name}</div>
+                <div style={{...small}}>{d.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="info-sec">
+          <h3 className="info-sec-title">Member Classes</h3>
+          <div className="info-class-grid">
+            {[
+              {cls:'Advisor', badge:'b-gold',   desc:clsAdvisor},
+              {cls:'Board',   badge:'b-blue',   desc:clsBoard},
+              {cls:'General', badge:'b-gray',   desc:clsGeneral},
+              {cls:'Alumni',  badge:'b-purple', desc:clsAlumni},
+              {cls:'Ex',      badge:'b-ex',     desc:clsEx},
+            ].map(cl=>(
+              <div key={cl.cls} className="info-role-card">
+                <div className="info-role-title" style={{marginBottom:5}}><span className={`badge ${cl.badge}`}>{cl.cls}</span></div>
+                <div style={{...small}}>{cl.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PUBLIC SHELL ─────────────────────────────────────────────────────────────
+function PublicShell2({ tab, setTab, onHome, children, settings, onAdminNav, showPrefs, setShowPrefs }) {
+  const tabs = [
+    ['debaters','🎤 Debaters'],['competitions','🏆 Competitions'],['membership','📋 Membership'],
+    settings.show_stats_on_public !== false && ['stats','📊 Stats'],['boards','🏛️ Board'],['materials','📚 Study'],['motions','📜 Motions'],['hof','🌟 Hall of Fame'],['info','ℹ️ Info'],
+  ].filter(Boolean);
+  return (
+    <div style={{display:'flex',flexDirection:'column',minHeight:'100vh'}}>
+      <div className="pub-header">
+        <div className="pub-topbar">
+          <div className="pub-brand" onClick={onHome}>
+            <div className={`brand-icon ${settings.logo_url?'':'logo-icon-bg'}`} style={{width:30,height:30,borderRadius:8}}>
+              {settings.logo_url ? <img src={settings.logo_url} alt="Logo" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:8}} /> : <span className="brand-icon-ph">E</span>}
+            </div>
+            <div style={{minWidth:0}}>
+              <div className="brand-name">{settings.org_name||'EDS UNIMA'}</div>
+              <div className="brand-sub">{settings.org_tagline||'Member Database'}</div>
+            </div>
+          </div>
+          <div style={{display:'flex',gap:6,flexShrink:0}}>
+            <button className="btn btn-ghost btn-sm" onClick={onHome}>← Home</button>
+            <button className="btn btn-ghost btn-sm" style={{padding:'5px 9px'}} onClick={()=>setShowPrefs(p=>!p)} title="Preferences">⚙️</button>
+            <button className="btn btn-primary btn-sm" onClick={onAdminNav}>Admin</button>
+          </div>
+        </div>
+        <div className="tab-strip">
+          {tabs.map(([k,l])=>(
+            <button key={k} className={`tab ${tab===k?'on':''}`} onClick={()=>setTab(k)}>{l}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{flex:1}}>{children}</div>
+      {settings.show_last_updated && <div style={{textAlign:'center',padding:'12px',fontSize:'.62rem',color:'var(--text3)',borderTop:'1px solid var(--border)'}}>Updated · EDS UNIMA Database</div>}
+    </div>
+  );
+}
+
+// ─── PORTAL MAIN APP ──────────────────────────────────────────────────────────
+export default function Portal() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { members, loading: mLoad } = useMembers();
+  const { competitions, loading: cLoad } = useCompetitions();
+  const { motions, loading: motionsLoad } = useMotions();
+  const { settings } = useSettings();
+  const { boards } = useBoards();
+  const { hof } = useHof();
+  const { materials, loading: matLoad } = useStudyMaterials();
+  const { info } = useInfoSettings();
+  const { prefs, setPref } = useUserPrefs();
+  const [showPrefs, setShowPrefs] = useState(false);
+
+  const [tab, setTab] = useState('debaters');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const initialTab = params.get('tab') || settings.default_tab || 'debaters';
+    setTab(initialTab);
+  }, [settings.default_tab]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setTab(params.get('tab') || settings.default_tab || 'debaters');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [settings.default_tab]);
+
+  const handleSetTab = (t) => {
+    setTab(t);
+    const url = new URL(window.location);
+    url.searchParams.set('tab', t);
+    window.history.pushState({}, '', url);
+  };
+
+  useEffect(() => {
+    if (prefs.theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+  }, [prefs.theme]);
+
+  useEffect(() => {
+    document.body.setAttribute('data-compact', prefs.compact_tables ? 'true' : 'false');
+  }, [prefs.compact_tables]);
+
+  useEffect(() => {
+    if (prefs.accent_color) applyAccent(prefs.accent_color);
+  }, [prefs.accent_color]);
+
+  useEffect(() => {
+    document.body.setAttribute('data-show-rank-icons', prefs.show_rank_icons !== false ? 'true' : 'false');
+  }, [prefs.show_rank_icons]);
+
+  if (settings.maintenance_mode) {
+    navigate('/');
+    return null;
+  }
+
+  if (mLoad || cLoad || motionsLoad) {
+    return (
+      <div className="loading-pg">
+        <div className="spin"/>
+        <p>Loading EDS UNIMA database…</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PublicShell2 tab={tab} setTab={handleSetTab} onHome={()=>navigate('/')} settings={settings} onAdminNav={()=>navigate('/admin')} showPrefs={showPrefs} setShowPrefs={setShowPrefs}>
+        {tab==='debaters' && <DebatersTab members={members} loading={mLoad} settings={settings} competitions={competitions} />}
+        {tab==='competitions' && <CompetitionsTab competitions={competitions} members={members} loading={cLoad} settings={settings} motions={motions} />}
+        {tab==='membership' && <MembershipTab members={members} loading={mLoad} competitions={competitions} settings={settings} />}
+        {tab==='stats' && <PublicDashboard members={members} competitions={competitions} materials={materials} motions={motions} loading={mLoad||cLoad||matLoad||motionsLoad} />}
+        {tab==='boards' && <BoardsTab boards={boards} members={members} />}
+        {tab==='materials' && <StudyMaterialsTab materials={materials} loading={matLoad} />}
+        {tab==='motions' && <MotionsTab competitions={competitions} settings={settings} members={members} motions={motions} />}
+        {tab==='hof' && <HallOfFameTab hof={hof} />}
+        {tab==='info' && <InfoTab info={info} settings={settings} />}
+      </PublicShell2>
+      {showPrefs && <UserPrefsPanel prefs={prefs} setPref={setPref} onClose={()=>setShowPrefs(false)} />}
+    </>
+  );
+}
+
+
