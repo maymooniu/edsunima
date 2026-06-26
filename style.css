@@ -526,3 +526,22 @@ tr:hover td{background:rgba(91,130,246,.03)}
   .info-role-grid{grid-template-columns:1fr}
   .info-class-grid{grid-template-columns:1fr}
 }
+
+/* ── STUDY MATERIALS SHARING HIGHLIGHT ── */
+@keyframes pulse-highlight {
+  0% {
+    box-shadow: 0 0 0 0px rgba(230, 184, 74, 0.7);
+    border-color: rgba(230, 184, 74, 1);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(230, 184, 74, 0);
+    border-color: rgba(230, 184, 74, 1);
+  }
+  100% {
+    box-shadow: 0 0 0 0px rgba(230, 184, 74, 0);
+  }
+}
+.pulse-highlight {
+  animation: pulse-highlight 2s ease-in-out 3;
+}
+

@@ -95,6 +95,7 @@ function Modal({ title, onClose, children, wide, sm }) {
 }
 
 // ─── PROFILE MODAL (member detail) ───────────────────────────────────────────
+// ─── PROFILE MODAL (member detail) ───────────────────────────────────────────
 function ProfileModal({ member, competitions, onClose }) {
   if (!member) return null;
   const ROLE_CLR = s => {
@@ -108,59 +109,175 @@ function ProfileModal({ member, competitions, onClose }) {
     return competitions.filter(c => (c.participants||[]).some(p=>p.memberId===member.id))
       .map(c => {
         const p = c.participants.find(p=>p.memberId===member.id);
-        return { code:c.code, competition:c.competition, role:p?.role, result:p?.result||null, date:c.comp_date };
+        return { id:c.id, code:c.code, competition:c.competition, role:p?.role, result:p?.result||null, date:c.comp_date };
       });
   }, [competitions, member.id]);
 
+  const sortedComps = useMemo(() => {
+    return [...myComps].sort((a,b) => b.id - a.id);
+  }, [myComps]);
+
+  const initials = useMemo(() => {
+    return member.full_name?.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase() || 'M';
+  }, [member.full_name]);
+
+  const avatarGradient = useMemo(() => {
+    if (member.division === 'English') return 'linear-gradient(135deg, var(--accent), var(--accent2))';
+    if (member.division === 'Indonesia') return 'linear-gradient(135deg, var(--orange), #f59e0b)';
+    return 'linear-gradient(135deg, var(--magenta), #e879f9)';
+  }, [member.division]);
+
+  const breakRate = useMemo(() => {
+    return member.total_competitions > 0 
+      ? Math.round((member.total_breaking || 0) / member.total_competitions * 100) 
+      : 0;
+  }, [member.total_competitions, member.total_breaking]);
+
   return (
-    <Modal title={member.full_name} onClose={onClose}>
-      <div className="profile-section">
-        <div className="profile-section-title">Identity</div>
+    <Modal title="Member Profile" onClose={onClose}>
+      {/* Player Card Header */}
+      <div style={{
+        display:'flex', alignItems:'center', gap:16, 
+        paddingBottom:16, borderBottom:'1px solid var(--border)', marginBottom:16
+      }}>
+        <div style={{
+          width:64, height:64, borderRadius:'50%', 
+          background: avatarGradient, 
+          display:'flex', alignItems:'center', justifyContent:'center', 
+          fontSize:'1.4rem', fontWeight:800, color:'#fff', 
+          boxShadow: '0 4px 14px rgba(0,0,0,.2)', flexShrink:0
+        }}>
+          {initials}
+        </div>
+        <div style={{minWidth:0, flex:1}}>
+          <h3 style={{fontSize:'1.1rem', fontWeight:800, color:'var(--text)', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+            {member.full_name}
+          </h3>
+          <div style={{display:'flex', gap:5, flexWrap:'wrap', alignItems:'center'}}>
+            <span className={`badge ${ROLE_CLR(member.membership_status)}`} style={{fontSize:'.65rem', fontWeight:700}}>
+              {member.membership_status||'Member'}
+            </span>
+            <DivBadge div={member.division}/>
+            <RankBadge rank={member.rank}/>
+            <ClassBadges classes={member.classes}/>
+          </div>
+        </div>
+      </div>
+
+      {/* Identity Grid */}
+      <div style={{
+        display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', 
+        gap:12, marginBottom:16, background:'rgba(255,255,255,.01)', 
+        border:'1px solid var(--border)', borderRadius:'var(--r2)', padding:12
+      }}>
         {[
-          ['Full Name', member.full_name],
           ['NIM', member.nim||'—'],
-          ['Course', member.course||'—'],
+          ['Course / Major', member.course||'—'],
           ['Email', member.email||'—'],
           ['WhatsApp', member.whatsapp||'—'],
         ].map(([k,v])=>(
-          <div key={k} className="profile-row">
-            <span className="profile-key">{k}</span>
-            <span className="profile-val">{v}</span>
+          <div key={k} style={{display:'flex', flexDirection:'column', gap:2}}>
+            <span style={{fontSize:'.6rem', color:'var(--text3)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em'}}>{k}</span>
+            <span style={{fontSize:'.78rem', color:'var(--text2)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}} title={v}>{v}</span>
           </div>
         ))}
       </div>
-      <div className="profile-section">
-        <div className="profile-section-title">Membership</div>
-        <div className="profile-row"><span className="profile-key">Division</span><span className="profile-val"><DivBadge div={member.division}/></span></div>
-        <div className="profile-row"><span className="profile-key">Rank</span><span className="profile-val"><RankBadge rank={member.rank}/></span></div>
-        <div className="profile-row"><span className="profile-key">Class</span><span className="profile-val"><ClassBadges classes={member.classes}/></span></div>
-        <div className="profile-row"><span className="profile-key">Role</span><span className="profile-val"><span className={`badge ${ROLE_CLR(member.membership_status)}`} style={{fontSize:'.7rem'}}>{member.membership_status||'Member'}</span></span></div>
-        <div className="profile-row"><span className="profile-key">Status</span><span className="profile-val"><StatusBadge s={member.active_status}/></span></div>
+
+      {/* Stats Cards */}
+      <div style={{marginBottom:18}}>
+        <div style={{fontSize:'.68rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', color:'var(--text3)', marginBottom:8}}>Debate Stats</div>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:8}}>
+          {[
+            { label: 'Competitions', val: member.total_competitions || 0, color: 'var(--accent)' },
+            { label: 'Rounds', val: member.total_rounds || 0, color: 'var(--text)' },
+            { label: 'Breaks', val: member.total_breaking || 0, color: 'var(--gold)' },
+            { label: 'Break Rate', val: `${breakRate}%`, color: 'var(--green)' }
+          ].map(stat => (
+            <div key={stat.label} style={{
+              background: 'var(--surface2)', 
+              border: '1px solid var(--border)', 
+              borderRadius: 'var(--r)', 
+              padding: '10px 4px', 
+              textAlign: 'center'
+            }}>
+              <div style={{fontSize: '1.1rem', fontWeight: 800, color: stat.color, lineHeight: 1.1}}>{stat.val}</div>
+              <div style={{fontSize: '.58rem', color: 'var(--text3)', textTransform: 'uppercase', marginTop: 4, fontWeight:600}}>{stat.label}</div>
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="profile-section">
-        <div className="profile-section-title">Debate Stats</div>
-        <div className="profile-row"><span className="profile-key">Competitions</span><span className="profile-val" style={{fontWeight:700,color:'var(--accent)'}}>{member.total_competitions||0}</span></div>
-        <div className="profile-row"><span className="profile-key">Rounds</span><span className="profile-val" style={{fontWeight:600}}>{member.total_rounds||0}</span></div>
-        <div className="profile-row"><span className="profile-key">Breaks</span><span className="profile-val" style={{fontWeight:600,color:(member.total_breaking>0)?'var(--gold)':'var(--text3)'}}>{member.total_breaking||0}</span></div>
-        <div className="profile-row"><span className="profile-key">Top Round</span><span className="profile-val" style={{color:member.top_round?'var(--green)':'var(--text3)',fontStyle:member.top_round?'normal':'italic'}}>{member.top_round||'—'}</span></div>
-      </div>
-      {myComps.length > 0 && (
-        <div className="profile-section">
-          <div className="profile-section-title">Competition History ({myComps.length})</div>
-          <div style={{maxHeight:220,overflowY:'auto'}}>
-            {myComps.map((c,i) => (
-              <div key={i} className="profile-comp-row">
-                <span className="profile-comp-code">{c.code}</span>
-                <div style={{flex:1,minWidth:0}}>
-                  <div className="profile-comp-name">{c.competition}</div>
-                  {c.date && <div style={{fontSize:'.67rem',color:'var(--text3)',marginTop:1}}>{c.date}</div>}
+
+      {/* Competition Timeline */}
+      {sortedComps.length > 0 && (
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:'.68rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', color:'var(--text3)', marginBottom:12}}>Timeline Tracker ({sortedComps.length})</div>
+          <div style={{position:'relative', paddingLeft: 8, maxHeight:240, overflowY:'auto', paddingRight:6}}>
+            {/* Vertical track line */}
+            <div style={{
+              position:'absolute', left: 16, top: 8, bottom: 8, width: 2, 
+              background: 'var(--border)', zIndex: 0
+            }} />
+
+            {sortedComps.map((c, i) => {
+              const isBreak = c.result && (
+                c.result.toLowerCase().includes('break') || 
+                c.result.toLowerCase().includes('champion') || 
+                c.result.toLowerCase().includes('runner') || 
+                c.result.toLowerCase().includes('speaker') ||
+                c.result.toLowerCase().includes('final')
+              );
+              
+              return (
+                <div key={i} style={{position:'relative', paddingLeft: 32, marginBottom: 14}}>
+                  {/* Timeline Dot */}
+                  <div style={{
+                    position: 'absolute', left: 10, top: 4, width: 14, height: 14, 
+                    borderRadius: '50%', 
+                    background: isBreak ? 'var(--gold)' : 'var(--accent)', 
+                    border: '3px solid var(--surface)',
+                    boxShadow: isBreak ? '0 0 8px rgba(223,170,50,.45)' : 'none',
+                    zIndex: 1
+                  }} />
+
+                  {/* Node Card */}
+                  <div style={{
+                    background: 'var(--surface2)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--r)',
+                    padding: '8px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10
+                  }}>
+                    <div style={{minWidth: 0, flex: 1}}>
+                      <div style={{display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', marginBottom:2}}>
+                        <span style={{fontWeight: 700, fontSize: '.76rem', color: 'var(--accent)'}}>{c.code}</span>
+                        {c.date && <span style={{fontSize: '.62rem', color: 'var(--text3)'}}>· {c.date}</span>}
+                      </div>
+                      <div style={{fontSize: '.78rem', color: 'var(--text)', fontWeight: 500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                        {c.competition}
+                      </div>
+                    </div>
+                    <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:2, flexShrink:0}}>
+                      <span className={`badge ${c.role==='Debater'?'b-blue':'b-purple'}`} style={{fontSize:'.6rem', fontWeight:700}}>{c.role}</span>
+                      {c.result && (
+                        <span style={{
+                          fontSize: '.68rem', 
+                          fontWeight: 700, 
+                          color: isBreak ? 'var(--gold)' : 'var(--green)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3
+                        }}>
+                          {isBreak ? '🏆' : '✓'} {c.result}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:3,flexShrink:0}}>
-                  <span className={`badge ${c.role==='Debater'?'b-blue':'b-purple'}`} style={{fontSize:'.63rem'}}>{c.role}</span>
-                  {c.result && <span className="profile-comp-result">{c.result}</span>}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -170,8 +287,12 @@ function ProfileModal({ member, competitions, onClose }) {
 }
 
 // ─── COMPETITION MODAL (participants) ─────────────────────────────────────────
-function CompParticipantsModal({ comp, members, onClose }) {
+function CompParticipantsModal({ comp, members, onClose, settings = {} }) {
   if (!comp) return null;
+  const motions = (settings.comp_motions || {})[comp.id] || [];
+  const hasMotions = motions.length > 0;
+  const [activeTab, setActiveTab] = useState('participants');
+
   const participants = comp.participants || [];
   const adjudicators = participants.filter(p=>p.role==='Adjudicator');
   const debaters = participants.filter(p=>p.role==='Debater');
@@ -192,35 +313,118 @@ function CompParticipantsModal({ comp, members, onClose }) {
   };
 
   return (
-    <Modal title={`${comp.code} — Participants`} onClose={onClose} wide>
+    <Modal title={`${comp.code}`} onClose={onClose} wide>
       <p style={{fontSize:'.8rem',color:'var(--text3)',marginBottom:14}}>{comp.competition}{comp.comp_date&&<span style={{marginLeft:8,color:'var(--text3)'}}>· {comp.comp_date}</span>}</p>
-      {!participants.length ? (
-        <p style={{color:'var(--text3)',fontSize:'.85rem',textAlign:'center',padding:20}}>No participants recorded.</p>
+      
+      {hasMotions && (
+        <div style={{ display: 'flex', gap: 12, borderBottom: '1px solid var(--border)', marginBottom: 16, paddingBottom: 4 }}>
+          <button 
+            onClick={() => setActiveTab('participants')}
+            style={{
+              padding: '6px 16px',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'participants' ? '2px solid var(--accent)' : '2px solid transparent',
+              color: activeTab === 'participants' ? 'var(--text)' : 'var(--text3)',
+              fontWeight: activeTab === 'participants' ? 700 : 500,
+              fontSize: '.82rem',
+              cursor: 'pointer',
+              transition: 'all .15s'
+            }}
+          >
+            👥 Participants ({participants.length})
+          </button>
+          <button 
+            onClick={() => setActiveTab('motions')}
+            style={{
+              padding: '6px 16px',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'motions' ? '2px solid var(--accent)' : '2px solid transparent',
+              color: activeTab === 'motions' ? 'var(--text)' : 'var(--text3)',
+              fontWeight: activeTab === 'motions' ? 700 : 500,
+              fontSize: '.82rem',
+              cursor: 'pointer',
+              transition: 'all .15s'
+            }}
+          >
+            📜 Motions ({motions.length})
+          </button>
+        </div>
+      )}
+
+      {(activeTab === 'participants' || !hasMotions) ? (
+        !participants.length ? (
+          <p style={{color:'var(--text3)',fontSize:'.85rem',textAlign:'center',padding:20}}>No participants recorded.</p>
+        ) : (
+          <>
+            {adjudicators.length > 0 && (
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:'.66rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--purple)',marginBottom:8}}>Adjudicators ({adjudicators.length})</div>
+                <div className="tbl-wrap">
+                  <table>
+                    <thead><tr><th>Name</th><th>Division</th><th>Rank</th><th>Role</th><th>Result</th></tr></thead>
+                    <tbody>{adjudicators.map((p,i)=><ParticipantRow key={i} p={p}/>)}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {debaters.length > 0 && (
+              <div>
+                <div style={{fontSize:'.66rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--blue)',marginBottom:8}}>Debaters ({debaters.length})</div>
+                <div className="tbl-wrap">
+                  <table>
+                    <thead><tr><th>Name</th><th>Division</th><th>Rank</th><th>Role</th><th>Result</th></tr></thead>
+                    <tbody>{debaters.map((p,i)=><ParticipantRow key={i} p={p}/>)}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )
       ) : (
-        <>
-          {adjudicators.length > 0 && (
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:'.66rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--purple)',marginBottom:8}}>Adjudicators ({adjudicators.length})</div>
-              <div className="tbl-wrap">
-                <table>
-                  <thead><tr><th>Name</th><th>Division</th><th>Rank</th><th>Role</th><th>Result</th></tr></thead>
-                  <tbody>{adjudicators.map((p,i)=><ParticipantRow key={i} p={p}/>)}</tbody>
-                </table>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '4px 0' }}>
+          {motions.map((m, idx) => (
+            <div key={idx} style={{
+              background: 'var(--surface2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--r)',
+              padding: 14,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: '.76rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{m.round}</span>
               </div>
-            </div>
-          )}
-          {debaters.length > 0 && (
-            <div>
-              <div style={{fontSize:'.66rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--blue)',marginBottom:8}}>Debaters ({debaters.length})</div>
-              <div className="tbl-wrap">
-                <table>
-                  <thead><tr><th>Name</th><th>Division</th><th>Rank</th><th>Role</th><th>Result</th></tr></thead>
-                  <tbody>{debaters.map((p,i)=><ParticipantRow key={i} p={p}/>)}</tbody>
-                </table>
+              <div style={{ 
+                fontStyle: 'italic', 
+                fontSize: '1rem', 
+                fontWeight: 600, 
+                color: 'var(--text)', 
+                lineHeight: 1.4,
+                padding: '4px 0'
+              }}>
+                "{m.motion}"
               </div>
+              {m.infoslide && (
+                <div style={{ 
+                  fontSize: '.78rem', 
+                  color: 'var(--text3)', 
+                  background: 'var(--surface)', 
+                  borderLeft: '3px solid var(--border2)', 
+                  padding: '8px 12px', 
+                  borderRadius: 4,
+                  whiteSpace: 'pre-line',
+                  marginTop: 4
+                }}>
+                  <div style={{ fontWeight: 700, fontSize: '.68rem', textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text2)', marginBottom: 4 }}>Info Slide</div>
+                  {m.infoslide}
+                </div>
+              )}
             </div>
-          )}
-        </>
+          ))}
+        </div>
       )}
       <div className="m-footer"><button className="btn btn-ghost" onClick={onClose}>Close</button></div>
     </Modal>
@@ -467,7 +671,7 @@ function CompetitionsTab({ competitions, members, loading, settings = {} }) {
           </div>
         </div>
       )}
-      {viewComp && <CompParticipantsModal comp={viewComp} members={members} onClose={()=>setViewComp(null)} />}
+      {viewComp && <CompParticipantsModal comp={viewComp} members={members} onClose={()=>setViewComp(null)} settings={settings} />}
     </div>
   );
 }
@@ -575,6 +779,151 @@ function MembershipTab({ members, loading, competitions, settings = {} }) {
 }
 
 // ─── PUBLIC DASHBOARD (Stats) ────────────────────────────────────────────────
+// ─── SVG DONUT CHART ─────────────────────────────────────────────────────────
+function DonutChart({ bp, ap }) {
+  const total = bp + ap;
+  const radius = 35;
+  const circ = 2 * Math.PI * radius; // ~219.9
+  const pctBP = total ? (bp / total) * 100 : 0;
+  const pctAP = total ? (ap / total) * 100 : 0;
+  const bpOffset = 0;
+  const apOffset = total ? (bp / total) * circ : 0;
+
+  return (
+    <div style={{display:'flex', alignItems:'center', gap:24, justifyContent:'center', padding:'16px 0'}}>
+      <div style={{position:'relative', width:110, height:110, flexShrink:0}}>
+        <svg viewBox="0 0 100 100" style={{transform:'rotate(-90deg)', width:'100%', height:'100%'}}>
+          {/* Background circle */}
+          <circle cx="50" cy="50" r={radius} fill="none" stroke="var(--border)" strokeWidth="10" />
+          {/* BP slice */}
+          {bp > 0 && (
+            <circle 
+              cx="50" cy="50" r={radius} 
+              fill="none" 
+              stroke="var(--accent)" 
+              strokeWidth="10" 
+              strokeDasharray={`${(bp/total)*circ} ${circ}`} 
+              strokeDashoffset={-bpOffset}
+              strokeLinecap="round"
+              style={{transition:'all .3s'}}
+            />
+          )}
+          {/* AP slice */}
+          {ap > 0 && (
+            <circle 
+              cx="50" cy="50" r={radius} 
+              fill="none" 
+              stroke="var(--accent2)" 
+              strokeWidth="10" 
+              strokeDasharray={`${(ap/total)*circ} ${circ}`} 
+              strokeDashoffset={-apOffset}
+              strokeLinecap="round"
+              style={{transition:'all .3s'}}
+            />
+          )}
+        </svg>
+        <div style={{
+          position:'absolute', inset:0, display:'flex', flexDirection:'column',
+          alignItems:'center', justifyContent:'center', pointerEvents:'none'
+        }}>
+          <span style={{fontSize:'1.05rem', fontWeight:800, color:'var(--text)', lineHeight:1}}>{total}</span>
+          <span style={{fontSize:'.55rem', color:'var(--text3)', textTransform:'uppercase', fontWeight:600, letterSpacing:'.05em'}}>Tourneys</span>
+        </div>
+      </div>
+      <div style={{display:'flex', flexDirection:'column', gap:10}}>
+        <div style={{display:'flex', alignItems:'center', gap:8}}>
+          <div style={{width:9, height:9, borderRadius:'50%', background:'var(--accent)'}} />
+          <div>
+            <div style={{fontSize:'.76rem', fontWeight:700, color:'var(--text)'}}>BP Format ({bp})</div>
+            <div style={{fontSize:'.65rem', color:'var(--text2)'}}>{pctBP.toFixed(0)}% of tournaments</div>
+          </div>
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:8}}>
+          <div style={{width:9, height:9, borderRadius:'50%', background:'var(--accent2)'}} />
+          <div>
+            <div style={{fontSize:'.76rem', fontWeight:700, color:'var(--text)'}}>AP Format ({ap})</div>
+            <div style={{fontSize:'.65rem', color:'var(--text2)'}}>{pctAP.toFixed(0)}% of tournaments</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SVG LEVEL COLUMN CHART ──────────────────────────────────────────────────
+function LevelColumnChart({ byLevel, maxVal }) {
+  const levels = ['International', 'National', 'Regional', 'Provincial', 'University'];
+  const colors = {
+    International: 'var(--accent2)',
+    National: 'var(--accent)',
+    Regional: 'var(--green)',
+    Provincial: 'var(--orange)',
+    University: 'var(--gold)'
+  };
+  const labelMap = {
+    International: 'Intl',
+    National: 'Nat',
+    Regional: 'Reg',
+    Provincial: 'Prov',
+    University: 'Univ'
+  };
+
+  const chartHeight = 100;
+  const chartWidth = 240;
+  const paddingLeft = 20;
+  const paddingBottom = 20;
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', alignItems:'center', padding:'10px 0'}}>
+      <svg width={chartWidth + paddingLeft} height={chartHeight + paddingBottom} style={{overflow:'visible'}}>
+        {/* Y Axis Grid lines */}
+        {[0, 0.5, 1].map((ratio, idx) => {
+          const y = chartHeight - (ratio * chartHeight);
+          const gridVal = Math.round(ratio * maxVal);
+          return (
+            <g key={idx}>
+              <line x1={paddingLeft} y1={y} x2={chartWidth} y2={y} stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
+              <text x={paddingLeft - 6} y={y + 3} fill="var(--text3)" fontSize=".6rem" textAnchor="end">{gridVal}</text>
+            </g>
+          );
+        })}
+
+        {/* Bars */}
+        {levels.map((level, idx) => {
+          const val = byLevel[level] || 0;
+          const barHeight = maxVal > 0 ? (val / maxVal) * chartHeight : 0;
+          const barWidth = 24;
+          const spacing = (chartWidth - paddingLeft) / levels.length;
+          const x = paddingLeft + (idx * spacing) + (spacing - barWidth) / 2;
+          const y = chartHeight - barHeight;
+
+          return (
+            <g key={level} style={{cursor:'pointer'}}>
+              {/* Bar */}
+              <rect 
+                x={x} y={y} width={barWidth} height={Math.max(barHeight, 2)} 
+                rx="3" ry="3"
+                fill={colors[level]} 
+                opacity={val > 0 ? 0.85 : 0.25}
+                style={{transition:'all .3s'}}
+                onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = val > 0 ? '0.85' : '0.25'; }}
+              />
+              {/* Value label on top of bar */}
+              {val > 0 && (
+                <text x={x + barWidth/2} y={y - 4} fill="var(--text2)" fontSize=".65rem" fontWeight="bold" textAnchor="middle">{val}</text>
+              )}
+              {/* X Axis Label */}
+              <text x={x + barWidth/2} y={chartHeight + 14} fill="var(--text3)" fontSize=".62rem" textAnchor="middle">{labelMap[level]}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// ─── PUBLIC DASHBOARD (Stats) ────────────────────────────────────────────────
 function PublicDashboard({ members, competitions, materials = [], loading }) {
   if (loading) return <div className="data-loading"><div className="spin"/><span>Loading stats…</span></div>;
 
@@ -612,6 +961,18 @@ function PublicDashboard({ members, competitions, materials = [], loading }) {
             <div className="dash-sub">{sub}</div>
           </div>
         ))}
+      </div>
+
+      {/* SVG Charts Grid */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:12,marginBottom:12}}>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Competition Formats</div>
+          <DonutChart bp={competitions.filter(c=>c.format==='BP').length} ap={competitions.filter(c=>c.format==='AP').length} />
+        </div>
+        <div className="card card-pad">
+          <div style={{fontWeight:700,marginBottom:14,fontSize:'.88rem'}}>Competitions by Level</div>
+          <LevelColumnChart byLevel={byLevel} maxVal={Math.max(...Object.values(byLevel), 1)} />
+        </div>
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:12,marginBottom:12}}>
@@ -1028,7 +1389,6 @@ function BoardsTab({ boards, members }) {
   );
 }
 
-
 // ─── HALL OF FAME TAB ─────────────────────────────────────────────────────────
 function HallOfFameTab({ hof }) {
   return (
@@ -1064,12 +1424,13 @@ function HallOfFameTab({ hof }) {
   );
 }
 
-// ─── STUDY MATERIALS TAB ──────────────────────────────────────────────────
 const MATERIAL_CATEGORIES = ['BP Format','AP Format','Adjudication','Motions','Strategy','Theory','General','Other'];
 
 function StudyMaterialsTab({ materials, loading }) {
   const [filter, setFilter] = React.useState('all');
   const [search, setSearch] = React.useState('');
+  const [highlightedId, setHighlightedId] = React.useState(null);
+  const [toast, toastEl] = useToast();
 
   const categories = React.useMemo(() => {
     const allCats = materials.flatMap(m => {
@@ -1114,6 +1475,44 @@ function StudyMaterialsTab({ materials, loading }) {
       window.open(m.url, '_blank', 'noopener');
     }
   };
+
+  const shareMaterial = (e, m) => {
+    e.stopPropagation();
+    const url = window.location.origin + window.location.pathname + '?tab=materials&id=' + m.id;
+    navigator.clipboard.writeText(url)
+      .then(() => {
+        toast('Link copied to clipboard!');
+      })
+      .catch(() => {
+        const textarea = document.createElement('textarea');
+        textarea.value = url;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          toast('Link copied to clipboard!');
+        } catch (err) {
+          toast('Failed to copy link', 'error');
+        }
+        document.body.removeChild(textarea);
+      });
+  };
+
+  React.useEffect(() => {
+    if (loading || !materials.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const targetId = params.get('id');
+    if (targetId) {
+      const idNum = parseInt(targetId, 10);
+      setHighlightedId(idNum);
+      setTimeout(() => {
+        const el = document.getElementById(`material-card-${idNum}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 500);
+    }
+  }, [loading, materials]);
 
   return (
     <div className="pub-content">
@@ -1174,8 +1573,8 @@ function StudyMaterialsTab({ materials, loading }) {
               </div>
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                gap: 12
+                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                gap: 8
               }}>
                 {highlighted.map(m => {
                   const cats = m.categories || (m.category ? [m.category] : []);
@@ -1183,47 +1582,49 @@ function StudyMaterialsTab({ materials, loading }) {
                   return (
                     <div 
                       key={m.id} 
+                      id={`material-card-${m.id}`}
+                      className={highlightedId === m.id ? 'pulse-highlight' : ''}
                       style={{
                         background: 'linear-gradient(135deg, rgba(230, 184, 74, 0.06) 0%, var(--surface) 100%)',
                         border: '2px solid rgba(230, 184, 74, 0.45)',
                         borderRadius: 'var(--r2)',
-                        padding: '18px 20px',
+                        padding: '10px 12px',
                         display: 'flex',
                         flexDirection: 'column',
                         justifyContent: 'space-between',
-                        gap: 14,
+                        gap: 8,
                         transition: 'all .22s cubic-bezier(0.4, 0, 0.2, 1)',
                         cursor: m.url ? 'pointer' : 'default',
                         position: 'relative',
-                        boxShadow: '0 4px 20px rgba(230, 184, 74, 0.1)'
+                        boxShadow: '0 2px 10px rgba(230, 184, 74, 0.06)'
                       }}
                       onClick={() => m.url && openMaterial(m)}
                       onMouseEnter={e => {
                         if (m.url) {
                           e.currentTarget.style.borderColor = 'rgba(230, 184, 74, 0.9)';
-                          e.currentTarget.style.boxShadow = '0 8px 30px rgba(230, 184, 74, 0.25)';
-                          e.currentTarget.style.transform = 'translateY(-3px)';
+                          e.currentTarget.style.boxShadow = '0 4px 15px rgba(230, 184, 74, 0.15)';
+                          e.currentTarget.style.transform = 'translateY(-2px)';
                         }
                       }}
                       onMouseLeave={e => {
                         e.currentTarget.style.borderColor = 'rgba(230, 184, 74, 0.45)';
-                        e.currentTarget.style.boxShadow = '0 4px 20px rgba(230, 184, 74, 0.1)';
+                        e.currentTarget.style.boxShadow = '0 2px 10px rgba(230, 184, 74, 0.06)';
                         e.currentTarget.style.transform = 'none';
                       }}
                     >
                       <div>
-                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12}}>
+                        <div style={{display:'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6}}>
                           {/* Icon */}
                           <div style={{
-                            width:42, height:42, borderRadius:'var(--r)', flexShrink:0, display:'flex',
-                            alignItems:'center', justifyContent:'center', fontSize:'1.25rem',
+                            width:26, height:26, borderRadius:'var(--r)', flexShrink:0, display:'flex',
+                            alignItems:'center', justifyContent:'center', fontSize:'.85rem',
                             background: 'rgba(230, 184, 74, 0.12)',
                             border: '1px solid rgba(230, 184, 74, 0.25)'
                           }}>
                             ⭐
                           </div>
                           <span style={{
-                            fontSize:'.62rem', fontWeight:800, padding:'2.5px 7px', borderRadius:4,
+                            fontSize:'.52rem', fontWeight:800, padding:'1px 4.5px', borderRadius:4,
                             background:'rgba(230, 184, 74, 0.15)', color:'var(--gold)',
                             border:'1px solid rgba(230, 184, 74, 0.3)', letterSpacing:'.03em'
                           }}>
@@ -1232,20 +1633,20 @@ function StudyMaterialsTab({ materials, loading }) {
                         </div>
 
                         {/* Info */}
-                        <div style={{fontWeight:700, fontSize:'.98rem', color:'var(--text)', marginBottom:6}}>
+                        <div style={{fontWeight:700, fontSize:'.8rem', color:'var(--text)', marginBottom:3}}>
                           {m.title}
                         </div>
                         {m.description && (
                           <div style={{
-                            fontSize:'.78rem', 
+                            fontSize:'.68rem', 
                             color:'var(--text2)', 
-                            marginBottom:14, 
+                            marginBottom:6, 
                             display:'-webkit-box', 
                             WebkitLineClamp:2, 
                             WebkitBoxOrient:'vertical', 
                             overflow:'hidden', 
                             textOverflow:'ellipsis',
-                            lineHeight:'1.5'
+                            lineHeight:'1.35'
                           }}>
                             {m.description}
                           </div>
@@ -1254,10 +1655,10 @@ function StudyMaterialsTab({ materials, loading }) {
 
                       <div>
                         {/* Category Tags */}
-                        <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap', marginBottom:14}}>
+                        <div style={{display:'flex', gap:3, alignItems:'center', flexWrap:'wrap', marginBottom:8}}>
                           {materialCats.map(cat => (
                             <span key={cat} style={{
-                              fontSize:'.63rem', fontWeight:700, padding:'2px 8px', borderRadius:10,
+                              fontSize:'.54rem', fontWeight:700, padding:'1px 5px', borderRadius:10,
                               background:'rgba(230, 184, 74, 0.08)', color:'var(--gold)',
                               border:'1px solid rgba(230, 184, 74, 0.15)', textTransform:'uppercase', letterSpacing:'.04em'
                             }}>{cat}</span>
@@ -1265,25 +1666,40 @@ function StudyMaterialsTab({ materials, loading }) {
                         </div>
 
                         {/* Bottom Section with Action and Date */}
-                        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', borderTop:'1px solid var(--border)', paddingTop:12}}>
+                        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', borderTop:'1px solid var(--border)', paddingTop:6}}>
                           <div style={{display:'flex', flexDirection:'column', gap:1, minWidth:0}}>
-                            <span style={{fontSize:'.66rem', color:'var(--text3)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:140}} title={m.material_type === 'file' ? m.file_name : m.url}>
+                            <span style={{fontSize:'.58rem', color:'var(--text3)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:90}} title={m.material_type === 'file' ? m.file_name : m.url}>
                               {m.material_type === 'file' ? (m.file_name || 'File') : 'External Link'}
                             </span>
-                            <span style={{fontSize:'.64rem', color:'var(--text3)'}}>{fmtDate(m.uploaded_at)}</span>
+                            <span style={{fontSize:'.56rem', color:'var(--text3)'}}>{fmtDate(m.uploaded_at)}</span>
                           </div>
-                          {m.url && (
-                            <div 
-                              className="btn-gold"
+                          <div style={{display:'flex', gap:6, alignItems:'center'}}>
+                            <button 
+                              onClick={(e) => shareMaterial(e, m)}
+                              className="btn btn-ghost"
                               style={{
-                                flexShrink:0, padding:'6px 14px', borderRadius:'var(--r)', fontSize:'.75rem', fontWeight:600,
-                                display:'flex', alignItems:'center', gap:5,
-                                boxShadow: '0 4px 12px rgba(223,170,50,.25)'
+                                padding:'3px 8px', borderRadius:'var(--r)', fontSize:'.65rem', fontWeight:600,
+                                color: 'var(--gold)', border: '1px solid rgba(230, 184, 74, 0.3)',
+                                background: 'transparent', cursor: 'pointer', transition: 'all .15s',
+                                display: 'flex', alignItems: 'center', gap: 3
                               }}
+                              title="Copy link to this resource"
                             >
-                              {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
-                            </div>
-                          )}
+                              🔗 Share
+                            </button>
+                            {m.url && (
+                              <div 
+                                className="btn-gold"
+                                style={{
+                                  flexShrink:0, padding:'3px 8px', borderRadius:'var(--r)', fontSize:'.65rem', fontWeight:600,
+                                  display:'flex', alignItems:'center', gap:3,
+                                  boxShadow: '0 2px 6px rgba(223,170,50,.15)'
+                                }}
+                              >
+                                {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1318,18 +1734,22 @@ function StudyMaterialsTab({ materials, loading }) {
                   const materialCats = cats.length > 0 ? cats : ['General'];
                   
                   return (
-                    <div key={m.id} style={{
-                      background: 'var(--surface)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--r2)',
-                      padding: '14px 18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 16,
-                      transition: 'all .15s ease',
-                      cursor: m.url ? 'pointer' : 'default',
-                      position: 'relative'
-                    }}
+                    <div 
+                      key={m.id} 
+                      id={`material-card-${m.id}`}
+                      className={highlightedId === m.id ? 'pulse-highlight' : ''}
+                      style={{
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--r2)',
+                        padding: '14px 18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 16,
+                        transition: 'all .15s ease',
+                        cursor: m.url ? 'pointer' : 'default',
+                        position: 'relative'
+                      }}
                       onClick={() => m.url && openMaterial(m)}
                       onMouseEnter={e => {
                         if (m.url) {
@@ -1381,19 +1801,39 @@ function StudyMaterialsTab({ materials, loading }) {
                       </div>
 
                       {/* Action */}
-                      {m.url && (
-                        <div 
+                      <div style={{display:'flex', gap:6, alignItems:'center', flexShrink:0}}>
+                        <button 
+                          onClick={(e) => shareMaterial(e, m)}
+                          className="btn btn-ghost"
                           style={{
-                            flexShrink:0, padding:'6px 14px', borderRadius:'var(--r)', fontSize:'.75rem', fontWeight:600,
-                            background: 'var(--accent)',
-                            color: '#fff',
-                            display:'flex', alignItems:'center', gap:5,
-                            whiteSpace:'nowrap'
+                            padding: '6px 12px',
+                            borderRadius: 'var(--r)',
+                            fontSize: '.72rem',
+                            color: 'var(--accent)',
+                            border: '1px solid rgba(108,143,255,0.3)',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            transition: 'all .15s',
+                            display: 'flex', alignItems: 'center', gap: 4
                           }}
+                          title="Copy link to this resource"
                         >
-                          {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
-                        </div>
-                      )}
+                          🔗 Share
+                        </button>
+                        {m.url && (
+                          <div 
+                            style={{
+                              flexShrink:0, padding:'6px 14px', borderRadius:'var(--r)', fontSize:'.75rem', fontWeight:600,
+                              background: 'var(--accent)',
+                              color: '#fff',
+                              display:'flex', alignItems:'center', gap:5,
+                              whiteSpace:'nowrap'
+                            }}
+                          >
+                            {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -1402,6 +1842,7 @@ function StudyMaterialsTab({ materials, loading }) {
           )}
         </div>
       )}
+      {toastEl}
     </div>
   );
 }

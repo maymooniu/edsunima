@@ -465,11 +465,135 @@ function AdminMembers({ members, refetch, toast }) {
   );
 }
 
+// ─── ADMIN COMPETITIONS MOTIONS MODAL ──────────────────────────────────────────
+function AdminCompMotionsModal({ comp, settings, saveSetting, toast, onClose }) {
+  const compId = comp.id;
+  const existingMotions = (settings.comp_motions || {})[compId] || [];
+  const [motions, setMotions] = useState(() => existingMotions.map(m => ({ ...m })));
+
+  const addRound = () => {
+    const roundNumber = motions.length + 1;
+    setMotions([...motions, { round: `Round ${roundNumber}`, motion: '', infoslide: '' }]);
+  };
+
+  const removeRound = (index) => {
+    setMotions(motions.filter((_, i) => i !== index));
+  };
+
+  const updateRound = (index, key, val) => {
+    setMotions(motions.map((m, i) => i === index ? { ...m, [key]: val } : m));
+  };
+
+  const save = async () => {
+    const invalid = motions.some(m => !m.round.trim() || !m.motion.trim());
+    if (invalid) {
+      if (!confirm('Some rounds have empty names or motion text. Are you sure you want to save?')) {
+        return;
+      }
+    }
+
+    const nextMotions = {
+      ...(settings.comp_motions || {}),
+      [compId]: motions.map(m => ({
+        round: m.round.trim(),
+        motion: m.motion.trim(),
+        infoslide: m.infoslide?.trim() || ''
+      })).filter(m => m.round || m.motion)
+    };
+
+    try {
+      await saveSetting('comp_motions', nextMotions);
+      toast('Motions saved successfully');
+      onClose();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+
+  return (
+    <Modal title={`Motions: ${comp.code}`} onClose={onClose} wide>
+      <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: 10, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {motions.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text3)', fontSize: '.84rem' }}>
+            No rounds defined for this competition. Click "+ Add Round" to create one.
+          </div>
+        ) : (
+          motions.map((m, idx) => (
+            <div key={idx} style={{
+              background: 'var(--surface2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--r)',
+              padding: 12,
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, fontSize: '.84rem', color: 'var(--accent)' }}>Round #{idx + 1}</span>
+                <button className="btn btn-danger btn-xs" onClick={() => removeRound(idx)} style={{ padding: '2px 6px' }}>Remove</button>
+              </div>
+              <div className="g2" style={{ gridGap: 8 }}>
+                <div className="fg">
+                  <label style={{ fontSize: '.74rem', marginBottom: 2 }}>Round Name *</label>
+                  <input 
+                    value={m.round} 
+                    onChange={e => updateRound(idx, 'round', e.target.value)} 
+                    placeholder="e.g. Round 1" 
+                    style={{ padding: '6px 8px', fontSize: '.8rem' }}
+                  />
+                </div>
+                <div className="fg" style={{ gridColumn: 'span 2' }}>
+                  <label style={{ fontSize: '.74rem', marginBottom: 2 }}>Motion *</label>
+                  <input 
+                    value={m.motion} 
+                    onChange={e => updateRound(idx, 'motion', e.target.value)} 
+                    placeholder="This House would..." 
+                    style={{ padding: '6px 8px', fontSize: '.8rem' }}
+                  />
+                </div>
+                <div className="fg" style={{ gridColumn: 'span 2' }}>
+                  <label style={{ fontSize: '.74rem', marginBottom: 2 }}>Info Slide (Optional)</label>
+                  <textarea 
+                    value={m.infoslide || ''} 
+                    onChange={e => updateRound(idx, 'infoslide', e.target.value)} 
+                    placeholder="Background information or definitions..." 
+                    style={{ 
+                      padding: '6px 8px', 
+                      fontSize: '.8rem', 
+                      height: 50, 
+                      resize: 'vertical',
+                      border: '1px solid var(--border2)',
+                      borderRadius: 'var(--r)',
+                      background: 'var(--surface)',
+                      color: 'var(--text)',
+                      outline: 'none',
+                      fontFamily: 'inherit'
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="m-footer" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14 }}>
+        <button className="btn btn-ghost btn-sm" onClick={addRound}>+ Add Round</button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary btn-sm" onClick={save}>Save Motions</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── ADMIN COMPETITIONS ───────────────────────────────────────────────────────
-function AdminCompetitions({ competitions, members, refetch, toast }) {
+function AdminCompetitions({ competitions, members, refetch, toast, settings, saveSetting }) {
   const [showForm, setShowForm] = useState(false);
   const [editC, setEditC] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [selectedCompForMotions, setSelectedCompForMotions] = useState(null);
   const [ordered, setOrdered] = useState([]);
   useEffect(()=>{setOrdered([...competitions]);},[competitions]);
 
@@ -513,7 +637,7 @@ function AdminCompetitions({ competitions, members, refetch, toast }) {
                   <td><FormatBadge f={c.format}/></td>
                   <td style={{fontSize:'.76rem'}}>{c.level}</td>
                   <td style={{textAlign:'center'}}>{(c.participants||[]).length}</td>
-                  <td><div style={{display:'flex',gap:4}}><button className="btn btn-outline btn-xs" onClick={()=>{setEditC(c);setShowForm(true);}}>Edit</button><button className="btn btn-danger btn-xs" onClick={()=>setConfirm(c.id)}>Del</button></div></td>
+                  <td><div style={{display:'flex',gap:4}}><button className="btn btn-outline btn-xs" onClick={()=>{setEditC(c);setShowForm(true);}}>Edit</button><button className="btn btn-outline btn-xs" onClick={()=>setSelectedCompForMotions(c)}>Motions</button><button className="btn btn-danger btn-xs" onClick={()=>setConfirm(c.id)}>Del</button></div></td>
                 </tr>
               ))}
             </tbody>
@@ -522,6 +646,7 @@ function AdminCompetitions({ competitions, members, refetch, toast }) {
       </div>
       {showForm && <CompForm comp={editC} members={members} onSave={addOrUpdate} onClose={()=>{setShowForm(false);setEditC(null);}} />}
       {confirm && <Modal title="Delete?" onClose={()=>setConfirm(null)} sm><p style={{color:'var(--text3)'}}>Permanently delete this competition?</p><div className="m-footer"><button className="btn btn-ghost" onClick={()=>setConfirm(null)}>Cancel</button><button className="btn btn-danger" onClick={()=>del(confirm)}>Delete</button></div></Modal>}
+      {selectedCompForMotions && <AdminCompMotionsModal comp={selectedCompForMotions} settings={settings} saveSetting={saveSetting} toast={toast} onClose={()=>setSelectedCompForMotions(null)} />}
     </div>
   );
 }
@@ -1320,7 +1445,7 @@ function AdminShell2({ onLogout, members, refetchMembers, competitions, refetchC
       <div className="admin-main">
         {section==='dashboard' && <AdminDashboard members={members} competitions={competitions} materials={materials} />}
         {section==='members' && <AdminMembers members={members} refetch={refetchMembers} toast={toast} />}
-        {section==='competitions' && <AdminCompetitions competitions={competitions} members={members} refetch={refetchCompetitions} toast={toast} />}
+        {section==='competitions' && <AdminCompetitions competitions={competitions} members={members} refetch={refetchCompetitions} toast={toast} settings={settings} saveSetting={saveSetting} />}
         {section==='boards' && <AdminBoards boards={boards} members={members} refetch={refetchBoards} toast={toast} />}
         {section==='materials' && <AdminStudyMaterials materials={materials} refetch={refetchMaterials} toast={toast} />}
         {section==='hof' && <AdminHallOfFame hof={hof} refetch={refetchHof} toast={toast} />}
