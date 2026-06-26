@@ -111,7 +111,7 @@ function ProfileModal({ member, competitions, onClose }) {
     return competitions.filter(c => (c.participants||[]).some(p=>p.memberId===member.id))
       .map(c => {
         const p = c.participants.find(p=>p.memberId===member.id);
-        return { id:c.id, code:c.code, competition:c.competition, role:p?.role, result:p?.result||null, date:c.comp_date };
+        return { id:c.id, code:c.code, competition:c.competition, organizer:c.organizer, role:p?.role, result:p?.result||null, date:c.comp_date };
       });
   }, [competitions, member.id]);
 
@@ -255,6 +255,7 @@ function ProfileModal({ member, competitions, onClose }) {
                     <div style={{minWidth: 0, flex: 1}}>
                       <div style={{display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', marginBottom:2}}>
                         <span style={{fontWeight: 700, fontSize: '.76rem', color: 'var(--accent)'}}>{c.code}</span>
+                        {c.organizer && <span style={{fontSize: '.68rem', color: 'var(--text2)', fontWeight: 600}}>({c.organizer})</span>}
                         {c.date && <span style={{fontSize: '.62rem', color: 'var(--text3)'}}>· {c.date}</span>}
                       </div>
                       <div style={{fontSize: '.78rem', color: 'var(--text)', fontWeight: 500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
@@ -318,7 +319,11 @@ function CompParticipantsModal({ comp, members, onClose, settings = {}, motions 
 
   return (
     <Modal title={`${comp.code}`} onClose={onClose} wide>
-      <p style={{fontSize:'.8rem',color:'var(--text3)',marginBottom:14}}>{comp.competition}{comp.comp_date&&<span style={{marginLeft:8,color:'var(--text3)'}}>· {comp.comp_date}</span>}</p>
+      <p style={{fontSize:'.8rem',color:'var(--text3)',marginBottom:14}}>
+        {comp.competition}
+        {comp.organizer && <span style={{marginLeft:8,color:'var(--text2)',fontWeight:600}}>({comp.organizer})</span>}
+        {comp.comp_date && <span style={{marginLeft:8,color:'var(--text3)'}}>· {comp.comp_date}</span>}
+      </p>
       
       {hasMotions && (
         <div style={{ display: 'flex', gap: 12, borderBottom: '1px solid var(--border)', marginBottom: 16, paddingBottom: 4 }}>
@@ -582,7 +587,7 @@ function CompetitionsTab({ competitions, members, loading, settings = {}, motion
 
   const filtered = useMemo(() => competitions.filter(c=>{
     const s=search.toLowerCase();
-    return (!s||c.competition?.toLowerCase().includes(s)||c.code?.toLowerCase().includes(s))
+    return (!s||c.competition?.toLowerCase().includes(s)||c.code?.toLowerCase().includes(s)||c.organizer?.toLowerCase().includes(s))
       && (fFmt==='All'||c.format===fFmt);
   }), [competitions,search,fFmt]);
 
@@ -641,14 +646,15 @@ function CompetitionsTab({ competitions, members, loading, settings = {}, motion
         <div className="tbl-wrap">
           {loading ? <div className="data-loading"><div className="spin"/><span>Loading…</span></div> : (
             <table>
-              <thead><tr><th>#</th><th>Code</th><th>Competition</th><th>Date</th><th>Fmt</th><th>Level</th><th>Results</th><th>Setting</th><th>Participants</th><th>Tab</th></tr></thead>
+              <thead><tr><th>#</th><th>Code</th><th>Competition</th><th>Organizer</th><th>Date</th><th>Fmt</th><th>Level</th><th>Results</th><th>Setting</th><th>Participants</th><th>Tab</th></tr></thead>
               <tbody>
-                {filtered.length===0 ? <tr><td colSpan={10} style={{textAlign:'center',color:'var(--text3)',padding:36}}>No results</td></tr>
+                {filtered.length===0 ? <tr><td colSpan={11} style={{textAlign:'center',color:'var(--text3)',padding:36}}>No results</td></tr>
                 : paginatedData.map((c,i)=>(
                   <tr key={c.id} className="tr-click" onClick={()=>setViewComp(c)}>
                     <td style={{color:'var(--text3)',fontWeight:600,fontSize:'.72rem'}}>{(itemsPerPage === Infinity ? 0 : (page - 1) * itemsPerPage) + i + 1}</td>
                     <td style={{fontWeight:700,color:'var(--accent)',whiteSpace:'nowrap',fontSize:'.78rem'}}>{c.code}</td>
                     <td style={{fontSize:'.81rem',maxWidth:160}}>{c.competition}</td>
+                    <td style={{fontSize:'.78rem',color:'var(--text2)',whiteSpace:'nowrap'}}>{c.organizer||'—'}</td>
                     <td style={{fontSize:'.72rem',color:'var(--text3)',whiteSpace:'nowrap'}}>{c.comp_date||'—'}</td>
                     <td><FormatBadge f={c.format}/></td>
                     <td style={{fontSize:'.76rem',whiteSpace:'nowrap'}}>{c.level}</td>

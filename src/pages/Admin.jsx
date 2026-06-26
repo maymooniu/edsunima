@@ -693,7 +693,7 @@ function AdminCompetitions({ competitions, members, refetch, toast, settings, sa
       <div className="card">
         <div className="tbl-wrap">
           <table>
-            <thead><tr><th style={{width:24}}></th><th>#</th><th>Code</th><th>Competition</th><th>Date</th><th>Fmt</th><th>Level</th><th>Participants</th><th>Actions</th></tr></thead>
+            <thead><tr><th style={{width:24}}></th><th>#</th><th>Code</th><th>Competition</th><th>Organizer</th><th>Date</th><th>Fmt</th><th>Level</th><th>Participants</th><th>Actions</th></tr></thead>
             <tbody>
               {ordered.map((c,i)=>(
                 <tr key={c.id} className={`drag-row ${isDragOver(i)?'drag-over':''}`} draggable onDragStart={e=>onDragStart(e,i)} onDragOver={e=>onDragOver(e,i)} onDrop={e=>onDrop(e,i)} onDragEnd={onDragEnd}>
@@ -701,6 +701,7 @@ function AdminCompetitions({ competitions, members, refetch, toast, settings, sa
                   <td style={{color:'var(--text3)',fontWeight:600,fontSize:'.72rem'}}>{i+1}</td>
                   <td style={{fontWeight:700,color:'var(--accent)',fontSize:'.78rem',whiteSpace:'nowrap'}}>{c.code}</td>
                   <td style={{fontSize:'.8rem',maxWidth:160}}>{c.competition}</td>
+                  <td style={{fontSize:'.78rem',color:'var(--text2)',whiteSpace:'nowrap'}}>{c.organizer||'—'}</td>
                   <td style={{fontSize:'.74rem',color:'var(--text3)',whiteSpace:'nowrap'}}>{c.comp_date||'—'}</td>
                   <td><FormatBadge f={c.format}/></td>
                   <td style={{fontSize:'.76rem'}}>{c.level}</td>
