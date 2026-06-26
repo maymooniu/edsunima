@@ -71,7 +71,7 @@ function HomePage2({ onNav, settings }) {
         {/* Secondary nav cards */}
         <div style={{
           display:'grid',
-          gridTemplateColumns:`repeat(${settings.show_stats_on_public !== false ? 5 : 4}, 1fr)`,
+          gridTemplateColumns:`repeat(${settings.show_stats_on_public !== false ? 6 : 5}, 1fr)`,
           gap:10,
           maxWidth:700,
           width:'100%',
@@ -81,6 +81,7 @@ function HomePage2({ onNav, settings }) {
             settings.show_stats_on_public !== false && {key:'stats',icon:'📊',title:'Stats'},
             {key:'boards',icon:'🏛️',title:'Board'},
             {key:'materials',icon:'📚',title:'Study'},
+            {key:'motions',icon:'📜',title:'Motions'},
             {key:'hof',icon:'🌟',title:'Hall of Fame'},
             {key:'info',icon:'ℹ️',title:'Info'},
           ].filter(Boolean).map(c=>(
