@@ -1095,6 +1095,9 @@ function StudyMaterialsTab({ materials, loading }) {
     });
   }, [materials, filter, search]);
 
+  const highlighted = React.useMemo(() => filtered.filter(m => m.is_highlighted), [filtered]);
+  const regular = React.useMemo(() => filtered.filter(m => !m.is_highlighted), [filtered]);
+
   const fmtDate = d => {
     if (!d) return '';
     const dt = new Date(d);
@@ -1151,111 +1154,252 @@ function StudyMaterialsTab({ materials, loading }) {
           <p>{materials.length === 0 ? 'No study materials uploaded yet.' : 'No materials match your search.'}</p>
         </div>
       ) : (
-        <div style={{display:'flex',flexDirection:'column',gap:10}}>
-          {filtered.map(m => {
-            const isHigh = !!m.is_highlighted;
-            const cats = m.categories || (m.category ? [m.category] : []);
-            const materialCats = cats.length > 0 ? cats : ['General'];
-            
-            return (
-              <div key={m.id} style={{
-                background: isHigh 
-                  ? 'linear-gradient(135deg, rgba(230, 184, 74, 0.06) 0%, var(--surface) 100%)' 
-                  : 'var(--surface)',
-                border: isHigh 
-                  ? '2px solid rgba(230, 184, 74, 0.45)' 
-                  : '1px solid var(--border)',
-                borderRadius: 'var(--r2)',
-                padding: isHigh ? '13px 17px' : '14px 18px',
+        <div style={{display:'flex',flexDirection:'column',gap:20}}>
+          {/* Highlighted / Featured Section */}
+          {highlighted.length > 0 && (
+            <div>
+              <div style={{
+                fontSize: '.75rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '.08em',
+                color: 'var(--gold)',
+                marginBottom: 12,
                 display: 'flex',
                 alignItems: 'center',
-                gap: 16,
-                transition: 'all .15s ease',
-                cursor: m.url ? 'pointer' : 'default',
-                position: 'relative'
-              }}
-                onClick={() => m.url && openMaterial(m)}
-                onMouseEnter={e => {
-                  if (m.url) {
-                    e.currentTarget.style.borderColor = isHigh ? 'rgba(230, 184, 74, 0.9)' : 'var(--accent)';
-                    e.currentTarget.style.boxShadow = isHigh ? '0 6px 24px rgba(230, 184, 74, 0.22)' : '0 0 0 1px var(--accent)';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = isHigh ? 'rgba(230, 184, 74, 0.45)' : 'var(--border)';
-                  e.currentTarget.style.boxShadow = isHigh ? '0 4px 20px rgba(230, 184, 74, 0.12)' : 'none';
-                  e.currentTarget.style.transform = 'none';
-                }}
-              >
-                {/* Icon */}
-                <div style={{
-                  width:44, height:44, borderRadius:'var(--r)', flexShrink:0, display:'flex',
-                  alignItems:'center', justifyContent:'center', fontSize:'1.3rem',
-                  background: isHigh 
-                    ? 'rgba(230, 184, 74, 0.12)' 
-                    : (m.material_type === 'file' ? 'rgba(168,85,247,.12)' : 'rgba(108,143,255,.12)'),
-                  border: isHigh 
-                    ? '1px solid rgba(230, 184, 74, 0.25)' 
-                    : `1px solid ${m.material_type === 'file' ? 'rgba(168,85,247,.25)' : 'rgba(108,143,255,.25)'}`
-                }}>
-                  {isHigh ? '⭐' : (m.material_type === 'file' ? '📄' : '🔗')}
-                </div>
-
-                {/* Info */}
-                <div style={{flex:1, minWidth:0}}>
-                  <div style={{fontWeight:700, fontSize:'.92rem', color:'var(--text)', marginBottom:3, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
-                    {m.title}
-                    {isHigh && (
-                      <span style={{
-                        fontSize:'.62rem', fontWeight:800, padding:'1px 6px', borderRadius:4,
-                        background:'rgba(230, 184, 74, 0.15)', color:'var(--gold)',
-                        border:'1px solid rgba(230, 184, 74, 0.3)', display:'flex', alignItems:'center', gap:2
-                      }}>
-                        FEATURED
-                      </span>
-                    )}
-                  </div>
-                  {m.description && (
-                    <div style={{fontSize:'.78rem', color:'var(--text3)', marginBottom:5, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
-                      {m.description}
-                    </div>
-                  )}
-                  <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
-                    {materialCats.map(cat => (
-                      <span key={cat} style={{
-                        fontSize:'.65rem', fontWeight:700, padding:'2px 8px', borderRadius:10,
-                        background:'rgba(108,143,255,.12)', color:'var(--accent)',
-                        border:'1px solid rgba(108,143,255,.2)', textTransform:'uppercase', letterSpacing:'.06em'
-                      }}>{cat}</span>
-                    ))}
-                    <span style={{fontSize:'.68rem', color:'var(--text3)'}}>
-                      {m.material_type === 'file' ? (m.file_name || 'File') : 'External Link'}
-                    </span>
-                    <span style={{fontSize:'.68rem', color:'var(--text3)'}}>·</span>
-                    <span style={{fontSize:'.68rem', color:'var(--text3)'}}>{fmtDate(m.uploaded_at)}</span>
-                  </div>
-                </div>
-
-                {/* Action */}
-                {m.url && (
-                  <div 
-                    className={isHigh ? 'btn-gold' : ''}
-                    style={{
-                      flexShrink:0, padding:'6px 14px', borderRadius:'var(--r)', fontSize:'.75rem', fontWeight:600,
-                      background: isHigh ? undefined : 'var(--accent)',
-                      color: isHigh ? undefined : '#fff',
-                      display:'flex', alignItems:'center', gap:5,
-                      whiteSpace:'nowrap',
-                      boxShadow: isHigh ? '0 4px 12px rgba(223,170,50,.25)' : 'none'
-                    }}
-                  >
-                    {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
-                  </div>
-                )}
+                gap: 6
+              }}>
+                <span>⭐ Featured Resources</span>
+                <div style={{flex:1, height:1, background:'linear-gradient(90deg, rgba(223,170,50,.35) 0%, transparent 100%)'}} />
               </div>
-            );
-          })}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                gap: 12
+              }}>
+                {highlighted.map(m => {
+                  const cats = m.categories || (m.category ? [m.category] : []);
+                  const materialCats = cats.length > 0 ? cats : ['General'];
+                  return (
+                    <div 
+                      key={m.id} 
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(230, 184, 74, 0.06) 0%, var(--surface) 100%)',
+                        border: '2px solid rgba(230, 184, 74, 0.45)',
+                        borderRadius: 'var(--r2)',
+                        padding: '18px 20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: 14,
+                        transition: 'all .22s cubic-bezier(0.4, 0, 0.2, 1)',
+                        cursor: m.url ? 'pointer' : 'default',
+                        position: 'relative',
+                        boxShadow: '0 4px 20px rgba(230, 184, 74, 0.1)'
+                      }}
+                      onClick={() => m.url && openMaterial(m)}
+                      onMouseEnter={e => {
+                        if (m.url) {
+                          e.currentTarget.style.borderColor = 'rgba(230, 184, 74, 0.9)';
+                          e.currentTarget.style.boxShadow = '0 8px 30px rgba(230, 184, 74, 0.25)';
+                          e.currentTarget.style.transform = 'translateY(-3px)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.borderColor = 'rgba(230, 184, 74, 0.45)';
+                        e.currentTarget.style.boxShadow = '0 4px 20px rgba(230, 184, 74, 0.1)';
+                        e.currentTarget.style.transform = 'none';
+                      }}
+                    >
+                      <div>
+                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12}}>
+                          {/* Icon */}
+                          <div style={{
+                            width:42, height:42, borderRadius:'var(--r)', flexShrink:0, display:'flex',
+                            alignItems:'center', justifyContent:'center', fontSize:'1.25rem',
+                            background: 'rgba(230, 184, 74, 0.12)',
+                            border: '1px solid rgba(230, 184, 74, 0.25)'
+                          }}>
+                            ⭐
+                          </div>
+                          <span style={{
+                            fontSize:'.62rem', fontWeight:800, padding:'2.5px 7px', borderRadius:4,
+                            background:'rgba(230, 184, 74, 0.15)', color:'var(--gold)',
+                            border:'1px solid rgba(230, 184, 74, 0.3)', letterSpacing:'.03em'
+                          }}>
+                            FEATURED
+                          </span>
+                        </div>
+
+                        {/* Info */}
+                        <div style={{fontWeight:700, fontSize:'.98rem', color:'var(--text)', marginBottom:6}}>
+                          {m.title}
+                        </div>
+                        {m.description && (
+                          <div style={{
+                            fontSize:'.78rem', 
+                            color:'var(--text2)', 
+                            marginBottom:14, 
+                            display:'-webkit-box', 
+                            WebkitLineClamp:2, 
+                            WebkitBoxOrient:'vertical', 
+                            overflow:'hidden', 
+                            textOverflow:'ellipsis',
+                            lineHeight:'1.5'
+                          }}>
+                            {m.description}
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        {/* Category Tags */}
+                        <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap', marginBottom:14}}>
+                          {materialCats.map(cat => (
+                            <span key={cat} style={{
+                              fontSize:'.63rem', fontWeight:700, padding:'2px 8px', borderRadius:10,
+                              background:'rgba(230, 184, 74, 0.08)', color:'var(--gold)',
+                              border:'1px solid rgba(230, 184, 74, 0.15)', textTransform:'uppercase', letterSpacing:'.04em'
+                            }}>{cat}</span>
+                          ))}
+                        </div>
+
+                        {/* Bottom Section with Action and Date */}
+                        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', borderTop:'1px solid var(--border)', paddingTop:12}}>
+                          <div style={{display:'flex', flexDirection:'column', gap:1, minWidth:0}}>
+                            <span style={{fontSize:'.66rem', color:'var(--text3)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:140}} title={m.material_type === 'file' ? m.file_name : m.url}>
+                              {m.material_type === 'file' ? (m.file_name || 'File') : 'External Link'}
+                            </span>
+                            <span style={{fontSize:'.64rem', color:'var(--text3)'}}>{fmtDate(m.uploaded_at)}</span>
+                          </div>
+                          {m.url && (
+                            <div 
+                              className="btn-gold"
+                              style={{
+                                flexShrink:0, padding:'6px 14px', borderRadius:'var(--r)', fontSize:'.75rem', fontWeight:600,
+                                display:'flex', alignItems:'center', gap:5,
+                                boxShadow: '0 4px 12px rgba(223,170,50,.25)'
+                              }}
+                            >
+                              {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Regular Materials Section */}
+          {regular.length > 0 && (
+            <div>
+              {highlighted.length > 0 && (
+                <div style={{
+                  fontSize: '.75rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '.08em',
+                  color: 'var(--text3)',
+                  marginBottom: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}>
+                  <span>All Materials</span>
+                  <div style={{flex:1, height:1, background:'linear-gradient(90deg, var(--border2) 0%, transparent 100%)'}} />
+                </div>
+              )}
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {regular.map(m => {
+                  const cats = m.categories || (m.category ? [m.category] : []);
+                  const materialCats = cats.length > 0 ? cats : ['General'];
+                  
+                  return (
+                    <div key={m.id} style={{
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--r2)',
+                      padding: '14px 18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 16,
+                      transition: 'all .15s ease',
+                      cursor: m.url ? 'pointer' : 'default',
+                      position: 'relative'
+                    }}
+                      onClick={() => m.url && openMaterial(m)}
+                      onMouseEnter={e => {
+                        if (m.url) {
+                          e.currentTarget.style.borderColor = 'var(--accent)';
+                          e.currentTarget.style.boxShadow = '0 0 0 1px var(--accent)';
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.borderColor = 'var(--border)';
+                        e.currentTarget.style.boxShadow = 'none';
+                        e.currentTarget.style.transform = 'none';
+                      }}
+                    >
+                      {/* Icon */}
+                      <div style={{
+                        width:44, height:44, borderRadius:'var(--r)', flexShrink:0, display:'flex',
+                        alignItems:'center', justifyContent:'center', fontSize:'1.3rem',
+                        background: m.material_type === 'file' ? 'rgba(168,85,247,.12)' : 'rgba(108,143,255,.12)',
+                        border: `1px solid ${m.material_type === 'file' ? 'rgba(168,85,247,.25)' : 'rgba(108,143,255,.25)'}`
+                      }}>
+                        {m.material_type === 'file' ? '📄' : '🔗'}
+                      </div>
+
+                      {/* Info */}
+                      <div style={{flex:1, minWidth:0}}>
+                        <div style={{fontWeight:700, fontSize:'.92rem', color:'var(--text)', marginBottom:3, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+                          {m.title}
+                        </div>
+                        {m.description && (
+                          <div style={{fontSize:'.78rem', color:'var(--text2)', marginBottom:5, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                            {m.description}
+                          </div>
+                        )}
+                        <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                          {materialCats.map(cat => (
+                            <span key={cat} style={{
+                              fontSize:'.65rem', fontWeight:700, padding:'2px 8px', borderRadius:10,
+                              background:'rgba(108,143,255,.12)', color:'var(--accent)',
+                              border:'1px solid rgba(108,143,255,.2)', textTransform:'uppercase', letterSpacing:'.06em'
+                            }}>{cat}</span>
+                          ))}
+                          <span style={{fontSize:'.68rem', color:'var(--text3)'}}>
+                            {m.material_type === 'file' ? (m.file_name || 'File') : 'External Link'}
+                          </span>
+                          <span style={{fontSize:'.68rem', color:'var(--text3)'}}>·</span>
+                          <span style={{fontSize:'.68rem', color:'var(--text3)'}}>{fmtDate(m.uploaded_at)}</span>
+                        </div>
+                      </div>
+
+                      {/* Action */}
+                      {m.url && (
+                        <div 
+                          style={{
+                            flexShrink:0, padding:'6px 14px', borderRadius:'var(--r)', fontSize:'.75rem', fontWeight:600,
+                            background: 'var(--accent)',
+                            color: '#fff',
+                            display:'flex', alignItems:'center', gap:5,
+                            whiteSpace:'nowrap'
+                          }}
+                        >
+                          {m.material_type === 'file' ? '⬇ Download' : '↗ Open Link'}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
