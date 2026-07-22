@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import supabase from '../supabaseClient';
 import * as XLSX from 'xlsx';
+import { computeMemberStats } from '../utils/statsCalculator';
 
 // ─── ACCENT COLORS MAP ───────────────────────────────────────────────────────
 export const ACCENT_MAP = {
@@ -122,6 +123,25 @@ export function useMembers() {
     return () => supabase.removeChannel(ch);
   }, []);
   return { members, loading, refetch:fetch };
+}
+
+export function useMembersWithStats(competitions = []) {
+  const { members, loading, refetch } = useMembers();
+  const enrichedMembers = useMemo(() => {
+    if (!competitions || !competitions.length) return members;
+    return members.map(m => {
+      const stats = computeMemberStats(m, competitions);
+      return {
+        ...m,
+        total_competitions: stats.total_competitions,
+        total_rounds: stats.total_rounds,
+        total_breaking: stats.total_breaking,
+        top_round: stats.top_round
+      };
+    });
+  }, [members, competitions]);
+
+  return { members: enrichedMembers, rawMembers: members, loading, refetch };
 }
 
 export function useCompetitions() {

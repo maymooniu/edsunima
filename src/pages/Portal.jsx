@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import supabase from '../supabaseClient';
 import {
   useMembers,
+  useMembersWithStats,
   useCompetitions,
   useSettings,
   useBoards,
@@ -18,6 +19,7 @@ import {
   exportAll,
   applyAccent
 } from '../hooks/useDatabase';
+import { isBreakResult } from '../utils/statsCalculator';
 
 
 
@@ -108,10 +110,20 @@ function ProfileModal({ member, competitions, onClose }) {
     return 'b-gray';
   };
   const myComps = useMemo(() => {
-    return competitions.filter(c => (c.participants||[]).some(p=>p.memberId===member.id))
+    return competitions.filter(c => (c.participants||[]).some(p=>String(p.memberId)===String(member.id)))
       .map(c => {
-        const p = c.participants.find(p=>p.memberId===member.id);
-        return { id:c.id, code:c.code, competition:c.competition, organizer:c.organizer, role:p?.role, result:p?.result||null, date:c.comp_date };
+        const p = c.participants.find(p=>String(p.memberId)===String(member.id));
+        return {
+          id: c.id,
+          code: c.code,
+          competition: c.competition,
+          organizer: c.organizer,
+          role: p?.role || 'Debater',
+          result: p?.result || (p?.break_stage && p?.break_stage !== 'None' ? p.break_stage : null),
+          rounds: p?.rounds !== undefined && p?.rounds !== null ? p.rounds : (c.prelim_rounds || 4),
+          isBreak: isBreakResult(p),
+          date: c.comp_date
+        };
       });
   }, [competitions, member.id]);
 
@@ -221,13 +233,13 @@ function ProfileModal({ member, competitions, onClose }) {
             }} />
 
             {sortedComps.map((c, i) => {
-              const isBreak = c.result && (
+              const isBreak = c.isBreak || (c.result && (
                 c.result.toLowerCase().includes('break') || 
                 c.result.toLowerCase().includes('champion') || 
                 c.result.toLowerCase().includes('runner') || 
                 c.result.toLowerCase().includes('speaker') ||
                 c.result.toLowerCase().includes('final')
-              );
+              ));
               
               return (
                 <div key={i} style={{position:'relative', paddingLeft: 32, marginBottom: 14}}>
@@ -263,7 +275,10 @@ function ProfileModal({ member, competitions, onClose }) {
                       </div>
                     </div>
                     <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:2, flexShrink:0}}>
-                      <span className={`badge ${c.role==='Debater'?'b-blue':'b-purple'}`} style={{fontSize:'.6rem', fontWeight:700}}>{c.role}</span>
+                      <div style={{display:'flex', alignItems:'center', gap:4}}>
+                        <span style={{fontSize:'.64rem', color:'var(--text3)', fontWeight:600}}>{c.rounds} rds</span>
+                        <span className={`badge ${c.role==='Debater'?'b-blue':'b-purple'}`} style={{fontSize:'.6rem', fontWeight:700}}>{c.role}</span>
+                      </div>
                       {c.result && (
                         <span style={{
                           fontSize: '.68rem', 
@@ -2445,8 +2460,8 @@ function PublicShell2({ tab, setTab, onHome, children, settings, onAdminNav, sho
 export default function Portal() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { members, loading: mLoad } = useMembers();
   const { competitions, loading: cLoad } = useCompetitions();
+  const { members, loading: mLoad } = useMembersWithStats(competitions);
   const { motions, loading: motionsLoad } = useMotions();
   const { settings } = useSettings();
   const { boards } = useBoards();

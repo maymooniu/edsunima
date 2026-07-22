@@ -4,6 +4,7 @@ import supabase from '../supabaseClient';
 const sb = supabase;
 import {
   useMembers,
+  useMembersWithStats,
   useCompetitions,
   useSettings,
   useBoards,
@@ -19,6 +20,7 @@ import {
   exportAll,
   applyAccent
 } from '../hooks/useDatabase';
+import { computeMemberStats, syncAllMemberStats, isBreakResult } from '../utils/statsCalculator';
 import * as XLSX from 'xlsx';
 
 
@@ -340,14 +342,32 @@ const CLASS_OPTS = ['Advisor','Board','General','Alumni','Ex'];
 const MEM_ROLES = ['President','Vice President','Secretary','Treasurer','Training Director','Training Officer','People Director','People Officer','MedCom Director','MedCom Officer','Member'];
 const TOP_ROUNDS = ['','Preliminary','Octofinals','Pre-Semifinal Newbie','Semifinal Newbie','Grandfinal Newbie','Pre-Semifinal Pratama','Semifinal Pratama','Grandfinal Pratama','National Break','Quarterfinal','Semifinal','Finals','Grandfinal','Grandfinal Varsity','Grandfinal Judge'];
 
-function MemberForm({ member, onSave, onClose }) {
+function MemberForm({ member, competitions = [], onSave, onClose }) {
   const [f, setF] = useState(member ? {...MEMBER_DEF,...member} : {...MEMBER_DEF});
   const set = (k,v) => setF(p=>({...p,[k]:v}));
   const toggleClass = c => { const cur=f.classes||[]; set('classes',cur.includes(c)?cur.filter(x=>x!==c):[...cur,c]); };
+
+  const computedStats = useMemo(() => {
+    return computeMemberStats(f, competitions);
+  }, [f, competitions]);
+
+  const memberComps = useMemo(() => {
+    if (!f.id) return [];
+    return competitions.filter(c => (c.participants||[]).some(p=>String(p.memberId)===String(f.id)));
+  }, [f.id, competitions]);
+
   const save = () => {
     if (!f.full_name?.trim()) return alert('Full name required.');
-    onSave({...f,nim:f.nim?.trim()||null,total_competitions:+f.total_competitions||0,total_rounds:+f.total_rounds||0,total_breaking:+f.total_breaking||0,top_round:f.top_round||null});
+    onSave({
+      ...f,
+      nim: f.nim?.trim()||null,
+      total_competitions: computedStats.total_competitions,
+      total_rounds: computedStats.total_rounds,
+      total_breaking: computedStats.total_breaking,
+      top_round: computedStats.top_round || null
+    });
   };
+
   return (
     <Modal title={member?'Edit Member':'Add New Member'} onClose={onClose} wide>
       <div className="g2">
@@ -361,14 +381,62 @@ function MemberForm({ member, onSave, onClose }) {
         <div className="fg"><label>Active Status *</label><select value={f.active_status} onChange={e=>set('active_status',e.target.value)}><option>Active</option><option>Inactive</option></select></div>
         <div className="fg"><label>Email</label><input type="email" value={f.email||''} onChange={e=>set('email',e.target.value)} placeholder="name@student.unima.ac.id" /></div>
         <div className="fg"><label>WhatsApp</label><input value={f.whatsapp||''} onChange={e=>set('whatsapp',e.target.value)} placeholder="08xxxxxxxxxx" /></div>
-        <div style={{gridColumn:'1/-1',borderTop:'1px solid var(--border)',paddingTop:12,marginTop:2}}>
-          <div style={{fontSize:'.68rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:10}}>Debate Statistics</div>
-          <div className="g3">
-            <div className="fg"><label>Competitions</label><input type="number" min="0" value={f.total_competitions} onChange={e=>set('total_competitions',e.target.value)} /></div>
-            <div className="fg"><label>Rounds</label><input type="number" min="0" value={f.total_rounds} onChange={e=>set('total_rounds',e.target.value)} /></div>
-            <div className="fg"><label>Breaking</label><input type="number" min="0" value={f.total_breaking} onChange={e=>set('total_breaking',e.target.value)} /></div>
-            <div className="fg span2"><label>Top Round</label><select value={f.top_round||''} onChange={e=>set('top_round',e.target.value)}>{TOP_ROUNDS.map(o=><option key={o} value={o}>{o||'— None —'}</option>)}</select></div>
+
+        <div style={{gridColumn:'1/-1',borderTop:'1px solid var(--border)',paddingTop:14,marginTop:4}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+            <div style={{fontSize:'.68rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--accent)'}}>
+              ⚡ Debate Statistics (Auto-Calculated)
+            </div>
+            <span style={{fontSize:'.68rem',color:'var(--text3)',fontStyle:'italic'}}>Derived automatically from competitions</span>
           </div>
+
+          <div style={{
+            display:'grid',gridTemplateColumns:'repeat(4, 1fr)',gap:10,
+            background:'var(--surface2)',padding:12,borderRadius:'var(--r2)',border:'1px solid var(--border)'
+          }}>
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:'.65rem',color:'var(--text3)',fontWeight:700,textTransform:'uppercase'}}>Competitions</div>
+              <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--accent)'}}>{computedStats.total_competitions}</div>
+            </div>
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:'.65rem',color:'var(--text3)',fontWeight:700,textTransform:'uppercase'}}>Rounds</div>
+              <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--text)'}}>{computedStats.total_rounds}</div>
+            </div>
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:'.65rem',color:'var(--text3)',fontWeight:700,textTransform:'uppercase'}}>Breaks</div>
+              <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--gold)'}}>{computedStats.total_breaking}</div>
+            </div>
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:'.65rem',color:'var(--text3)',fontWeight:700,textTransform:'uppercase'}}>Top Round</div>
+              <div style={{fontSize:'.82rem',fontWeight:700,color:'var(--green)',marginTop:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={computedStats.top_round}>
+                {computedStats.top_round||'—'}
+              </div>
+            </div>
+          </div>
+
+          {memberComps.length > 0 && (
+            <div style={{marginTop:12}}>
+              <div style={{fontSize:'.68rem',fontWeight:600,color:'var(--text2)',marginBottom:6}}>Competitions Record ({memberComps.length})</div>
+              <div style={{maxHeight:120,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,paddingRight:4}}>
+                {memberComps.map(c => {
+                  const p = (c.participants||[]).find(part => String(part.memberId) === String(f.id));
+                  return (
+                    <div key={c.id} style={{
+                      display:'flex',alignItems:'center',justifyContent:'space-between',
+                      padding:'5px 9px',background:'var(--surface3)',borderRadius:'var(--r)',fontSize:'.75rem'
+                    }}>
+                      <span style={{fontWeight:600,color:'var(--text)'}}>{c.code} <span style={{color:'var(--text3)',fontWeight:400}}>({c.competition})</span></span>
+                      <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                        <span style={{fontSize:'.68rem',padding:'1px 5px',borderRadius:4,background:p?.role==='Debater'?'rgba(108,143,255,.15)':'rgba(168,85,247,.15)',color:p?.role==='Debater'?'var(--accent)':'var(--purple)',fontWeight:600}}>{p?.role||'Debater'}</span>
+                        <span style={{color:'var(--text2)',fontSize:'.72rem'}}>{p?.rounds!==undefined?p.rounds:(c.prelim_rounds||4)} rds</span>
+                        {isBreakResult(p) && <span className="badge b-gold" style={{fontSize:'.62rem'}}>Break</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
       <div className="m-footer"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>{member?'Save':'Add Member'}</button></div>
@@ -377,7 +445,11 @@ function MemberForm({ member, onSave, onClose }) {
 }
 
 // ─── COMP FORM ────────────────────────────────────────────────────────────────
-const COMP_DEF = { comp_date:'', code:'', competition:'', organizer:'', format:'BP', type:'Open', level:'National', results:[], setting:'In-Person', tabulation:'', participants:[] };
+const BREAK_STAGES = [
+  'None', 'Octofinals', 'Quarterfinals', 'Semifinals', 'Grand Finalist', 'Finalist', 'Champion', 'Co-Champion', 'EFL Break', 'Novice Break', 'Break Judge'
+];
+
+const COMP_DEF = { comp_date:'', code:'', competition:'', organizer:'', format:'BP', type:'Open', level:'National', prelim_rounds: 4, results:[], setting:'In-Person', tabulation:'', participants:[] };
 
 function CompForm({ comp, members, onSave, onClose }) {
   const [f, setF] = useState(comp ? {...COMP_DEF,...comp,participants:(comp.participants||[]).map(p=>({...p}))} : {...COMP_DEF});
@@ -390,6 +462,7 @@ function CompForm({ comp, members, onSave, onClose }) {
   const removeResult = i => set('results',f.results.filter((_,j)=>j!==i));
 
   const getParticipant = id => f.participants?.find(p=>p.memberId===id)||null;
+
   const togglePart = (id, role) => {
     const cur = f.participants||[];
     const ex = cur.find(p=>p.memberId===id);
@@ -397,8 +470,19 @@ function CompForm({ comp, members, onSave, onClose }) {
       if (ex.role===role) set('participants',cur.filter(p=>p.memberId!==id));
       else set('participants',cur.map(p=>p.memberId===id?{...p,role}:p));
     } else {
-      set('participants',[...cur,{memberId:id,role,result:''}]);
+      set('participants',[...cur,{ memberId:id, role, rounds: f.prelim_rounds||4, isBreak: false, break_stage: 'None', result:'' }]);
     }
+  };
+
+  const updatePartField = (id, prop, value) => {
+    set('participants', (f.participants||[]).map(p => {
+      if (p.memberId !== id) return p;
+      const updated = { ...p, [prop]: value };
+      if (prop === 'break_stage' && value !== 'None') {
+        updated.isBreak = true;
+      }
+      return updated;
+    }));
   };
 
   const filteredMembersForPicker = useMemo(() => {
@@ -411,15 +495,14 @@ function CompForm({ comp, members, onSave, onClose }) {
     });
   }, [members, partSearch, partTab, f.participants]);
 
-  const setResult = (id, result) => {
-    set('participants',f.participants.map(p=>p.memberId===id?{...p,result}:p));
-  };
-
   const selectedParticipants = (f.participants||[]).map(p=>({...p,member:members.find(m=>m.id===p.memberId)})).filter(p=>p.member);
   const adjus = selectedParticipants.filter(p=>p.role==='Adjudicator');
   const debs = selectedParticipants.filter(p=>p.role==='Debater');
 
-  const save = () => { if (!f.code?.trim()||!f.competition?.trim()) return alert('Code and name required.'); onSave(f); };
+  const save = () => {
+    if (!f.code?.trim()||!f.competition?.trim()) return alert('Code and name required.');
+    onSave(f);
+  };
 
   return (
     <Modal title={comp?'Edit Competition':'Add Competition'} onClose={onClose} wide>
@@ -431,12 +514,13 @@ function CompForm({ comp, members, onSave, onClose }) {
         <div className="fg"><label>Format</label><select value={f.format} onChange={e=>set('format',e.target.value)}><option>BP</option><option>AP</option></select></div>
         <div className="fg"><label>Type</label><select value={f.type} onChange={e=>set('type',e.target.value)}>{['Open','Varsity','School','ProAms'].map(o=><option key={o}>{o}</option>)}</select></div>
         <div className="fg"><label>Level</label><select value={f.level} onChange={e=>set('level',e.target.value)}>{['International','National','Regional','Provincial','University'].map(o=><option key={o}>{o}</option>)}</select></div>
+        <div className="fg"><label>Prelim Rounds</label><input type="number" min="1" max="20" value={f.prelim_rounds||4} onChange={e=>set('prelim_rounds',+e.target.value||4)} placeholder="4" title="Default preliminary rounds for participants" /></div>
         <div className="fg"><label>Setting</label><select value={f.setting} onChange={e=>set('setting',e.target.value)}>{['In-Person','Online','Hybrid'].map(o=><option key={o}>{o}</option>)}</select></div>
-        <div className="fg"><label>Tabulation Link</label><input value={f.tabulation||''} onChange={e=>set('tabulation',e.target.value)} placeholder="https://tabbycat.link/…" /></div>
+        <div className="fg span2"><label>Tabulation Link</label><input value={f.tabulation||''} onChange={e=>set('tabulation',e.target.value)} placeholder="https://tabbycat.link/…" /></div>
         <div className="fg span2">
           <label>Overall Competition Results</label>
           <div style={{display:'flex',gap:7,marginBottom:8}}>
-            <input value={newResult} onChange={setNewResult} placeholder="e.g. Break Grandfinal, 3rd Speaker…" onKeyDown={e=>e.key==='Enter'&&addResult()} style={{flex:1,padding:'8px 11px',border:'1px solid var(--border2)',borderRadius:'var(--r)',fontSize:'.84rem',background:'var(--surface2)',color:'var(--text)',outline:'none'}} />
+            <input value={newResult} onChange={e=>setNewResult(e.target.value)} placeholder="e.g. Break Grandfinal, 3rd Speaker…" onKeyDown={e=>e.key==='Enter'&&addResult()} style={{flex:1,padding:'8px 11px',border:'1px solid var(--border2)',borderRadius:'var(--r)',fontSize:'.84rem',background:'var(--surface2)',color:'var(--text)',outline:'none'}} />
             <button className="btn btn-ghost btn-sm" onClick={addResult}>+ Add</button>
           </div>
           <div className="result-tags">{(f.results||[]).map((r,i)=><span key={i} className="result-tag">{r}<button onClick={()=>removeResult(i)}>×</button></span>)}</div>
@@ -487,22 +571,59 @@ function CompForm({ comp, members, onSave, onClose }) {
 
       {selectedParticipants.length > 0 && (
         <div style={{marginTop:16}}>
-          <div style={{fontSize:'.68rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:8}}>Individual Results (optional)</div>
-          <div className="per-person-result-wrap">
-            {adjus.length > 0 && <div style={{fontSize:'.66rem',color:'var(--purple)',fontWeight:600,marginBottom:4}}>Adjudicators</div>}
-            {adjus.map(p=>(
-              <div key={p.memberId} className="ppr-row">
-                <span className="ppr-name">{p.member.full_name}</span>
-                <span className="ppr-role adjudicator">Adj</span>
-                <input className="ppr-input" value={p.result||''} onChange={e=>setResult(p.memberId,e.target.value)} placeholder="e.g. Break Judge" />
-              </div>
-            ))}
-            {debs.length > 0 && <div style={{fontSize:'.66rem',color:'var(--blue)',fontWeight:600,marginBottom:4,marginTop:4}}>Debaters</div>}
-            {debs.map(p=>(
-              <div key={p.memberId} className="ppr-row">
-                <span className="ppr-name">{p.member.full_name}</span>
-                <span className="ppr-role debater">Deb</span>
-                <input className="ppr-input" value={p.result||''} onChange={e=>setResult(p.memberId,e.target.value)} placeholder="e.g. Grandfinal, 2nd Speaker" />
+          <div style={{fontSize:'.68rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:8}}>Individual Participant Rounds & Results</div>
+          <div className="per-person-result-wrap" style={{display:'flex',flexDirection:'column',gap:8}}>
+            {selectedParticipants.map(p => (
+              <div key={p.memberId} style={{
+                background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--r2)',padding:'8px 12px',
+                display:'flex',flexDirection:'column',gap:6
+              }}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:6}}>
+                  <div style={{display:'flex',alignItems:'center',gap:6}}>
+                    <span style={{fontWeight:700,fontSize:'.84rem',color:'var(--text)'}}>{p.member.full_name}</span>
+                    <span className={`ppr-role ${p.role==='Adjudicator'?'adjudicator':'debater'}`}>{p.role==='Adjudicator'?'Adj':'Deb'}</span>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:10,fontSize:'.78rem'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:4}}>
+                      <span style={{color:'var(--text3)',fontSize:'.72rem',fontWeight:600}}>Rounds:</span>
+                      <input 
+                        type="number" min="0" max="30"
+                        value={p.rounds !== undefined && p.rounds !== null ? p.rounds : (f.prelim_rounds||4)} 
+                        onChange={e => updatePartField(p.memberId, 'rounds', +e.target.value)}
+                        style={{width:50,padding:'3px 6px',fontSize:'.78rem',borderRadius:'var(--r)',border:'1px solid var(--border2)',background:'var(--surface)',color:'var(--text)',textAlign:'center'}}
+                      />
+                    </div>
+                    <label style={{display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer',userSelect:'none'}}>
+                      <input 
+                        type="checkbox" 
+                        checked={!!p.isBreak || (p.break_stage && p.break_stage !== 'None')} 
+                        onChange={e => updatePartField(p.memberId, 'isBreak', e.target.checked)} 
+                      />
+                      <span style={{fontWeight:600,color:p.isBreak?'var(--gold)':'var(--text2)'}}>Broke</span>
+                    </label>
+                  </div>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                  <div>
+                    <label style={{fontSize:'.64rem',color:'var(--text3)',fontWeight:600,textTransform:'uppercase',display:'block',marginBottom:2}}>Break Stage</label>
+                    <select 
+                      value={p.break_stage || 'None'} 
+                      onChange={e => updatePartField(p.memberId, 'break_stage', e.target.value)}
+                      style={{width:'100%',padding:'4px 8px',fontSize:'.76rem',borderRadius:'var(--r)',border:'1px solid var(--border2)',background:'var(--surface)',color:'var(--text)'}}
+                    >
+                      {BREAK_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{fontSize:'.64rem',color:'var(--text3)',fontWeight:600,textTransform:'uppercase',display:'block',marginBottom:2}}>Individual Result / Award</label>
+                    <input 
+                      value={p.result || ''} 
+                      onChange={e => updatePartField(p.memberId, 'result', e.target.value)}
+                      placeholder="e.g. Champion, 1st Best Speaker" 
+                      style={{width:'100%',padding:'4px 8px',fontSize:'.76rem',borderRadius:'var(--r)',border:'1px solid var(--border2)',background:'var(--surface)',color:'var(--text)'}}
+                    />
+                  </div>
+                </div>
               </div>
             ))}
           </div>
@@ -515,7 +636,7 @@ function CompForm({ comp, members, onSave, onClose }) {
 }
 
 // ─── ADMIN MEMBERS ────────────────────────────────────────────────────────────
-function AdminMembers({ members, refetch, toast }) {
+function AdminMembers({ members, competitions = [], refetch, toast }) {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editM, setEditM] = useState(null);
@@ -639,7 +760,7 @@ function AdminMembers({ members, refetch, toast }) {
           </table>
         </div>
       </div>
-      {showForm && <MemberForm member={editM} onSave={addOrUpdate} onClose={()=>{setShowForm(false);setEditM(null);}} />}
+      {showForm && <MemberForm member={editM} competitions={competitions} onSave={addOrUpdate} onClose={()=>{setShowForm(false);setEditM(null);}} />}
       {confirm && <Modal title="Delete Member?" onClose={()=>setConfirm(null)} sm><p style={{color:'var(--text3)'}}>This permanently deletes the member. Cannot be undone.</p><div className="m-footer"><button className="btn btn-ghost" onClick={()=>setConfirm(null)}>Cancel</button><button className="btn btn-danger" onClick={()=>del(confirm)}>Delete</button></div></Modal>}
     </div>
   );
@@ -816,17 +937,36 @@ function AdminCompetitions({ competitions, members, refetch, toast, settings, sa
   const { onDragStart, onDragOver, onDrop, onDragEnd, isDragOver } = useDragReorder(ordered,setOrdered,saveOrder);
 
   const addOrUpdate = async form => {
+    let updatedComps = [];
     if (editC) {
-      const { id, created_at, ...rest } = form;
+      const { id: _id, created_at: _created_at, ...rest } = form;
       const { error } = await sb.from('competitions').update(rest).eq('id',editC.id);
-      if (error) toast(error.message,'error'); else { toast('Updated'); await refetch(); }
+      if (error) toast(error.message,'error');
+      else {
+        toast('Updated competition & synced stats');
+        await refetch();
+        updatedComps = competitions.map(c => c.id === editC.id ? { ...c, ...rest } : c);
+      }
     } else {
-      const { error } = await sb.from('competitions').insert({...form,order_index:competitions.length+1});
-      if (error) toast(error.message,'error'); else { toast('Added'); await refetch(); }
+      const { data, error } = await sb.from('competitions').insert({...form,order_index:competitions.length+1}).select();
+      if (error) toast(error.message,'error');
+      else {
+        toast('Added competition & synced stats');
+        await refetch();
+        updatedComps = [...competitions, data?.[0] || form];
+      }
     }
+    await syncAllMemberStats(members, updatedComps.length ? updatedComps : competitions);
     setShowForm(false); setEditC(null);
   };
-  const del = async id => { await sb.from('competitions').delete().eq('id',id); toast('Deleted'); await refetch(); setConfirm(null); };
+  const del = async id => {
+    await sb.from('competitions').delete().eq('id',id);
+    toast('Deleted & synced stats');
+    const remaining = competitions.filter(c => c.id !== id);
+    await syncAllMemberStats(members, remaining);
+    await refetch();
+    setConfirm(null);
+  };
 
   return (
     <div className="admin-content">
@@ -2091,7 +2231,7 @@ function AdminShell2({ onLogout, members, refetchMembers, competitions, refetchC
       </div>
       <div className="admin-main">
         {section==='dashboard' && <AdminDashboard members={members} competitions={competitions} materials={materials} />}
-        {section==='members' && <AdminMembers members={members} refetch={refetchMembers} toast={toast} />}
+        {section==='members' && <AdminMembers members={members} competitions={competitions} refetch={refetchMembers} toast={toast} />}
         {section==='competitions' && <AdminCompetitions competitions={competitions} members={members} refetch={refetchCompetitions} toast={toast} settings={settings} saveSetting={saveSetting} refetchMotions={refetchMotions} />}
         {section==='boards' && <AdminBoards boards={boards} members={members} refetch={refetchBoards} toast={toast} />}
         {section==='materials' && <AdminStudyMaterials materials={materials} refetch={refetchMaterials} toast={toast} />}
@@ -2111,8 +2251,8 @@ export default function Admin() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  const { members, loading: mLoad, refetch: refetchMembers } = useMembers();
   const { competitions, loading: cLoad, refetch: refetchCompetitions } = useCompetitions();
+  const { members, loading: mLoad, refetch: refetchMembers } = useMembersWithStats(competitions);
   const { motions, loading: motionsLoad, refetch: refetchMotions } = useMotions();
   const { settings, saveSetting } = useSettings();
   const { boards, refetch: refetchBoards } = useBoards();
